@@ -5,12 +5,18 @@ import { watchForServerUpdates } from "../net/version";
 
 type StatusReason = "update-available" | "disconnected";
 
+function formatStartedAt(startedAt: number): string {
+  return new Date(startedAt).toLocaleTimeString();
+}
+
 export function ConnectionStatusBanner({ room }: { room: Room | null }) {
   const [reason, setReason] = useState<StatusReason | null>(null);
+  const [serverStartedAt, setServerStartedAt] = useState<number | null>(null);
 
   useEffect(() => {
     const stop = watchForServerUpdates({
       onUpdateAvailable: () => setReason((current) => current ?? "update-available"),
+      onStatusChange: setServerStartedAt,
     });
     return stop;
   }, []);
@@ -22,20 +28,27 @@ export function ConnectionStatusBanner({ room }: { room: Room | null }) {
     return () => room.onLeave.remove(handleLeave);
   }, [room]);
 
-  if (!reason) return null;
-
   const message =
     reason === "disconnected"
       ? "Lost connection to the game server -- it may have restarted."
       : "A new version of the game is available.";
 
   return (
-    <div class="connection-status-banner" data-connection-status={reason}>
-      <span>{message}</span>
-      <button type="button" onClick={() => window.location.reload()}>
-        Reload
-      </button>
-    </div>
+    <>
+      {serverStartedAt !== null && (
+        <div class="server-status-badge" data-server-status>
+          Server started {formatStartedAt(serverStartedAt)}
+        </div>
+      )}
+      {reason && (
+        <div class="connection-status-banner" data-connection-status={reason}>
+          <span>{message}</span>
+          <button type="button" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 

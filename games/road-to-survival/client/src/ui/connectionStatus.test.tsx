@@ -33,6 +33,42 @@ afterEach(() => {
   mockWatchForServerUpdates.mockReset();
 });
 
+describe("server status badge", () => {
+  it("shows the server's started time once a status check succeeds", async () => {
+    let onStatusChange: (startedAt: number) => void = () => {};
+    mockWatchForServerUpdates.mockImplementation((opts) => {
+      onStatusChange = opts.onStatusChange;
+      return () => {};
+    });
+
+    render(<ConnectionStatusBanner room={null} />);
+    expect(document.querySelector("[data-server-status]")).toBeNull();
+
+    onStatusChange(new Date("2026-01-01T10:15:00").getTime());
+    await flush();
+
+    expect(document.querySelector("[data-server-status]")?.textContent).toContain("Server started");
+  });
+
+  it("stays visible alongside the disconnected/update banner once both are known", async () => {
+    let onStatusChange: (startedAt: number) => void = () => {};
+    let onUpdateAvailable: () => void = () => {};
+    mockWatchForServerUpdates.mockImplementation((opts) => {
+      onStatusChange = opts.onStatusChange;
+      onUpdateAvailable = opts.onUpdateAvailable;
+      return () => {};
+    });
+
+    render(<ConnectionStatusBanner room={null} />);
+    onStatusChange(Date.now());
+    onUpdateAvailable();
+    await flush();
+
+    expect(document.querySelector("[data-server-status]")).not.toBeNull();
+    expect(document.querySelector('[data-connection-status="update-available"]')).not.toBeNull();
+  });
+});
+
 describe("update-available", () => {
   it("renders nothing until watchForServerUpdates reports an update", async () => {
     let onUpdateAvailable: () => void = () => {};

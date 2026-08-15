@@ -26,6 +26,15 @@ describe("watchForServerUpdates", () => {
     stop();
   });
 
+  it("calls onStatusChange with the server's startedAt on every successful check", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ startedAt: 1000 })));
+    const onStatusChange = vi.fn();
+
+    const stop = watchForServerUpdates({ onUpdateAvailable: vi.fn(), onStatusChange, pollIntervalMs: 1000 });
+    await vi.waitFor(() => expect(onStatusChange).toHaveBeenCalledWith(1000));
+    stop();
+  });
+
   it("fires once a later poll sees a different startedAt", async () => {
     const fetchMock = vi
       .fn()

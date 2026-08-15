@@ -133,14 +133,26 @@
       .game-hud-roster li[data-ready="true"] { color: #8ee08e; }
 
       #connection-status {
+        font-family: system-ui, sans-serif;
+      }
+      .server-status-badge {
+        position: fixed;
+        bottom: 8px;
+        left: 8px;
+        z-index: 15;
+        padding: 4px 10px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #9a8b6f;
+        font-size: 11px;
+        border-radius: 4px;
+        pointer-events: none;
+      }
+      .connection-status-banner {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
         z-index: 20;
-        font-family: system-ui, sans-serif;
-      }
-      .connection-status-banner {
         display: flex;
         justify-content: center;
         align-items: center;

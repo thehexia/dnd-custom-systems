@@ -5,6 +5,9 @@ const DEFAULT_POLL_INTERVAL_MS = 5000;
 
 export interface WatchForServerUpdatesOptions {
   onUpdateAvailable: () => void;
+  /** Called with the server's reported startedAt on every successful check, so callers can show
+   * a persistent "server started at X" readout rather than only a conditional warning. */
+  onStatusChange?: (startedAt: number) => void;
   pollIntervalMs?: number;
 }
 
@@ -15,6 +18,7 @@ export interface WatchForServerUpdatesOptions {
  */
 export function watchForServerUpdates({
   onUpdateAvailable,
+  onStatusChange,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 }: WatchForServerUpdatesOptions): () => void {
   let knownStartedAt: number | undefined;
@@ -25,6 +29,8 @@ export function watchForServerUpdates({
       const res = await fetch(HEALTH_URL);
       const data: { startedAt?: unknown } = await res.json();
       if (typeof data.startedAt !== "number") return;
+
+      onStatusChange?.(data.startedAt);
 
       if (knownStartedAt === undefined) {
         knownStartedAt = data.startedAt;
