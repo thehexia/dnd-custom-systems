@@ -90,6 +90,47 @@
         min-width: 52px;
       }
       .room-gate-copy-row [data-copy]:hover { background: #333; }
+
+      #game-hud {
+        position: fixed;
+        left: 50%;
+        bottom: 24px;
+        transform: translateX(-50%);
+        z-index: 5;
+        font-family: system-ui, sans-serif;
+        color: #f2e6c9;
+      }
+      .game-hud {
+        background: rgba(43, 31, 20, 0.92);
+        border: 1px solid #4a2e1d;
+        border-radius: 8px;
+        padding: 16px 20px;
+        min-width: 240px;
+        text-align: center;
+      }
+      .game-hud h2 { margin: 0 0 8px; font-size: 16px; }
+      .game-hud p { margin: 0; font-size: 14px; color: #d8c9a3; }
+      .game-hud button {
+        padding: 8px 16px;
+        background: #f2b705;
+        border: none;
+        border-radius: 4px;
+        color: #2b1f14;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .game-hud button:disabled { background: #8a7454; color: #d8c9a3; cursor: default; }
+      .game-hud-actions { display: flex; gap: 8px; justify-content: center; }
+      .game-hud-roster {
+        list-style: none;
+        margin: 12px 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 14px;
+      }
+      .game-hud-roster li[data-ready="true"] { color: #8ee08e; }
     </style>
   </head>
   <body>
