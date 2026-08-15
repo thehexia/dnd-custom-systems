@@ -21,7 +21,7 @@
       }
 
       :root {
-        --theme-bg: #ddc28e;
+        --theme-bg: #f8f6d8;
         --theme-accent: #ffc61a;
         --theme-accent-contrast: #2b1f14;
         --theme-text: #fdf4dd;
@@ -40,10 +40,18 @@
         --panel-shadow: 0 14px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
       }
 
+      /* The game scene (MainScene.ts) mirrors its day/night ambient theme onto <html> as this
+         attribute, matching its DAY_SKY/NIGHT_SKY colors and THEME_TRANSITION_MS, so the page
+         background outside the canvas crossfades along with it instead of staying static. */
+      :root[data-time-of-day="night"] {
+        --theme-bg: #12131f;
+      }
+
       html, body {
         margin: 0;
         padding: 0;
         background: var(--theme-bg);
+        transition: background-color 0.7s ease;
       }
       body { font-family: var(--theme-font-body); }
       #app { display: flex; justify-content: center; align-items: center; height: 100vh; padding-left: 220px; }

@@ -46,11 +46,32 @@ const NIGHT_ICON_TINT = 0xfdf4dd;
 const FONT_DISPLAY = "MedievalSharp";
 const FONT_BODY = "IM Fell English";
 
+// The board's ambient theme (sky color behind the panels, plus a star field) tracks whichever
+// segment is currently being viewed and crossfades between these two states -- distinct from
+// the per-tile day/night fills above, which never animate.
+const DAY_SKY = 0xf8f6d8;
+const NIGHT_SKY = 0x12131f;
+const STAR_COUNT = 60;
+const THEME_TRANSITION_MS = 700;
+
+// weekText and jumpButton sit directly on the sky (they're positioned above the nav bar, not
+// on the content card), so their color has to crossfade with the sky too -- otherwise the
+// near-white DAY_SKY leaves the light "night" text color unreadable during the day.
+const WEEK_TEXT_DAY = 0x2b1f14;
+const WEEK_TEXT_NIGHT = 0xfdf4dd;
+const JUMP_BUTTON_DAY = 0x1d5f86;
+const JUMP_BUTTON_NIGHT = 0x9fd3f2;
+
 interface NavLayout {
   navX: number;
   tileHeight: number;
   positions: number[];
   total: number;
+}
+
+interface Star {
+  obj: Phaser.GameObjects.Arc;
+  baseAlpha: number;
 }
 
 // A rectangle with its top-left and bottom-right corners sliced off, matching the CSS
@@ -67,6 +88,11 @@ function bevelledRectPoints(x: number, y: number, width: number, height: number,
   ];
 }
 
+function rgbToCss({ r, g, b }: { r: number; g: number; b: number }): string {
+  const toHex = (n: number) => Math.round(n).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 export class MainScene extends Phaser.Scene {
   private room!: Room;
   private track!: Phaser.GameObjects.Graphics;
@@ -78,6 +104,12 @@ export class MainScene extends Phaser.Scene {
   private navLayout: NavLayout | null = null;
   private selectedSegment: number | null = null;
   private lastKnownCurrentSegment: number | null = null;
+  private stars: Star[] = [];
+  private starVisibility = 0;
+  private weekTextColor = WEEK_TEXT_NIGHT;
+  private jumpButtonColor = JUMP_BUTTON_NIGHT;
+  private skyTween: Phaser.Tweens.Tween | null = null;
+  private isDayTheme: boolean | null = null;
 
   constructor() {
     super("main");
@@ -93,6 +125,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   create() {
+    this.cameras.main.setBackgroundColor(NIGHT_SKY);
+    this.createStarField();
     this.drawContentCard();
 
     this.track = this.add.graphics();
@@ -132,6 +166,78 @@ export class MainScene extends Phaser.Scene {
 
   private navX(): number {
     return this.scale.width - NAV_RIGHT_MARGIN - NAV_TILE_WIDTH;
+  }
+
+  // Scattered once up front (behind the content card and nav bar, since it's the first thing
+  // added to the scene) and faded in/out by the day/night theme transition rather than
+  // recreated -- their positions and per-star brightness stay fixed for the scene's lifetime.
+  private createStarField(): void {
+    for (let i = 0; i < STAR_COUNT; i++) {
+      const x = Phaser.Math.Between(0, this.scale.width);
+      const y = Phaser.Math.Between(0, this.scale.height);
+      const radius = Phaser.Math.FloatBetween(0.6, 1.8);
+      const baseAlpha = Phaser.Math.FloatBetween(0.3, 0.9);
+      const obj = this.add.circle(x, y, radius, 0xfdf4dd, 0);
+      this.stars.push({ obj, baseAlpha });
+    }
+  }
+
+  // Crossfades the camera's background color, the star field's opacity, and the sky-mounted
+  // text colors between the day and night ambience. The first call (isDayTheme still null)
+  // applies instantly so there's no fade-in from the scene's initial paint; every change after
+  // that tweens.
+  private applyDayNightTheme(isDay: boolean): void {
+    if (this.isDayTheme === isDay) return;
+    const animate = this.isDayTheme !== null;
+    this.isDayTheme = isDay;
+    document.documentElement.dataset.timeOfDay = isDay ? "day" : "night";
+
+    const targetSky = isDay ? DAY_SKY : NIGHT_SKY;
+    const targetStars = isDay ? 0 : 1;
+    const targetWeekText = isDay ? WEEK_TEXT_DAY : WEEK_TEXT_NIGHT;
+    const targetJumpButton = isDay ? JUMP_BUTTON_DAY : JUMP_BUTTON_NIGHT;
+
+    if (!animate) {
+      this.cameras.main.setBackgroundColor(targetSky);
+      this.starVisibility = targetStars;
+      for (const star of this.stars) star.obj.setAlpha(star.baseAlpha * targetStars);
+      this.weekTextColor = targetWeekText;
+      this.jumpButtonColor = targetJumpButton;
+      this.weekText.setColor(rgbToCss(Phaser.Display.Color.IntegerToRGB(targetWeekText)));
+      this.jumpButton.setColor(rgbToCss(Phaser.Display.Color.IntegerToRGB(targetJumpButton)));
+      return;
+    }
+
+    this.skyTween?.stop();
+    const fromSky = Phaser.Display.Color.IntegerToColor(this.cameras.main.backgroundColor.color);
+    const toSky = Phaser.Display.Color.IntegerToColor(targetSky);
+    const fromStars = this.starVisibility;
+    const fromWeekText = Phaser.Display.Color.IntegerToColor(this.weekTextColor);
+    const toWeekText = Phaser.Display.Color.IntegerToColor(targetWeekText);
+    const fromJumpButton = Phaser.Display.Color.IntegerToColor(this.jumpButtonColor);
+    const toJumpButton = Phaser.Display.Color.IntegerToColor(targetJumpButton);
+    const proxy = { t: 0 };
+
+    this.skyTween = this.tweens.add({
+      targets: proxy,
+      t: 1,
+      duration: THEME_TRANSITION_MS,
+      ease: "Sine.easeInOut",
+      onUpdate: () => {
+        const blendedSky = Phaser.Display.Color.Interpolate.ColorWithColor(fromSky, toSky, 100, proxy.t * 100);
+        this.cameras.main.setBackgroundColor(Phaser.Display.Color.GetColor(blendedSky.r, blendedSky.g, blendedSky.b));
+        this.starVisibility = Phaser.Math.Linear(fromStars, targetStars, proxy.t);
+        for (const star of this.stars) star.obj.setAlpha(star.baseAlpha * this.starVisibility);
+
+        const blendedWeekText = Phaser.Display.Color.Interpolate.ColorWithColor(fromWeekText, toWeekText, 100, proxy.t * 100);
+        this.weekTextColor = Phaser.Display.Color.GetColor(blendedWeekText.r, blendedWeekText.g, blendedWeekText.b);
+        this.weekText.setColor(rgbToCss(blendedWeekText));
+
+        const blendedJumpButton = Phaser.Display.Color.Interpolate.ColorWithColor(fromJumpButton, toJumpButton, 100, proxy.t * 100);
+        this.jumpButtonColor = Phaser.Display.Color.GetColor(blendedJumpButton.r, blendedJumpButton.g, blendedJumpButton.b);
+        this.jumpButton.setColor(rgbToCss(blendedJumpButton));
+      },
+    });
   }
 
   // The card's geometry only depends on the canvas size (fixed) and layout constants, not on
@@ -244,6 +350,7 @@ export class MainScene extends Phaser.Scene {
     const dayLabel = `Day ${day}, ${timeOfDayLabel}${phaseLabel}`;
     this.dayText.setText(dayLabel);
     this.syncSelectionToDom(dayLabel);
+    this.applyDayNightTheme(timeOfDay === "day");
 
     this.track.clear();
     for (let i = 1; i <= total; i++) {
