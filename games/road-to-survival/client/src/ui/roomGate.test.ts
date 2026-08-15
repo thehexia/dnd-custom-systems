@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, within } from "@testing-library/preact";
 
 const mockCreateRoom = vi.fn();
 const mockJoinRoom = vi.fn();
@@ -15,20 +16,20 @@ vi.mock("../net/room", async (importOriginal) => {
 const { RoomAccessError } = await import("../net/room");
 const { showRoomGate } = await import("./roomGate.js");
 
-function submit(form: HTMLFormElement) {
-  form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-}
-
 function flush() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function createRoomAndGetCreatedSection() {
+function getForm(name: "create" | "join" | "link-join"): HTMLFormElement {
+  return document.querySelector<HTMLFormElement>(`[data-form="${name}"]`)!;
+}
+
+async function createRoomAndGetCreatedPanel() {
   mockCreateRoom.mockResolvedValueOnce({ room: {}, code: "ABCDEF", password: "pw123" });
   showRoomGate();
-  const createForm = document.querySelector<HTMLFormElement>('[data-form="create"]')!;
-  createForm.querySelector<HTMLInputElement>('input[name="username"]')!.value = "alice";
-  submit(createForm);
+  const form = getForm("create");
+  fireEvent.input(within(form).getByLabelText("Username"), { target: { value: "alice" } });
+  fireEvent.submit(form);
   await flush();
 }
 
@@ -36,7 +37,6 @@ beforeEach(() => {
   mockCreateRoom.mockReset();
   mockJoinRoom.mockReset();
   localStorage.clear();
-  document.body.innerHTML = "";
 });
 
 afterEach(() => {
@@ -49,20 +49,36 @@ afterEach(() => {
 
 describe("create room", () => {
   it("shows the join link, code, and password, and remembers the username", async () => {
-    mockCreateRoom.mockResolvedValueOnce({ room: {}, code: "ABCDEF", password: "pw123" });
-
-    showRoomGate();
-
-    const createForm = document.querySelector<HTMLFormElement>('[data-form="create"]')!;
-    createForm.querySelector<HTMLInputElement>('input[name="username"]')!.value = "alice";
-    submit(createForm);
-    await flush();
+    await createRoomAndGetCreatedPanel();
 
     const expectedLink = `${window.location.origin}${window.location.pathname}?room=ABCDEF`;
-    expect(document.querySelector("[data-created-link]")!.textContent).toBe(expectedLink);
-    expect(document.querySelector("[data-created-code]")!.textContent).toBe("ABCDEF");
-    expect(document.querySelector("[data-created-password]")!.textContent).toBe("pw123");
+    expect(screen.getByText(expectedLink)).toBeTruthy();
+    expect(screen.getByText("ABCDEF")).toBeTruthy();
+    expect(screen.getByText("pw123")).toBeTruthy();
     expect(localStorage.getItem("road-to-survival:lastUsername:ABCDEF")).toBe("alice");
+  });
+
+  it("omits daysPerWeek when the field is left blank", async () => {
+    mockCreateRoom.mockResolvedValueOnce({ room: {}, code: "ABCDEF", password: "pw123" });
+    showRoomGate();
+    const form = getForm("create");
+    fireEvent.input(within(form).getByLabelText("Username"), { target: { value: "alice" } });
+    fireEvent.submit(form);
+    await flush();
+
+    expect(mockCreateRoom).toHaveBeenCalledWith("alice", undefined);
+  });
+
+  it("passes a parsed days-per-week value when provided", async () => {
+    mockCreateRoom.mockResolvedValueOnce({ room: {}, code: "ABCDEF", password: "pw123" });
+    showRoomGate();
+    const form = getForm("create");
+    fireEvent.input(within(form).getByLabelText("Username"), { target: { value: "alice" } });
+    fireEvent.input(within(form).getByLabelText("Days per week (optional, default 5)"), { target: { value: "3" } });
+    fireEvent.submit(form);
+    await flush();
+
+    expect(mockCreateRoom).toHaveBeenCalledWith("alice", 3);
   });
 });
 
@@ -72,12 +88,11 @@ describe("join room", () => {
 
     showRoomGate();
 
-    document.querySelector<HTMLButtonElement>('[data-tab="join"]')!.click();
-    const codeInput = document.querySelector<HTMLInputElement>('[data-form="join"] input[name="code"]')!;
-    const usernameInput = document.querySelector<HTMLInputElement>('[data-form="join"] input[name="username"]')!;
+    fireEvent.click(screen.getByRole("button", { name: "Join / Rejoin Room" }));
+    const form = getForm("join");
+    const usernameInput = within(form).getByLabelText("Username") as HTMLInputElement;
 
-    codeInput.value = "abcdef";
-    codeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    fireEvent.input(within(form).getByLabelText("Room Code"), { target: { value: "abcdef" } });
 
     expect(usernameInput.value).toBe("bob");
   });
@@ -85,12 +100,11 @@ describe("join room", () => {
   it("does not pre-fill a username for a room never joined in this browser", async () => {
     showRoomGate();
 
-    document.querySelector<HTMLButtonElement>('[data-tab="join"]')!.click();
-    const codeInput = document.querySelector<HTMLInputElement>('[data-form="join"] input[name="code"]')!;
-    const usernameInput = document.querySelector<HTMLInputElement>('[data-form="join"] input[name="username"]')!;
+    fireEvent.click(screen.getByRole("button", { name: "Join / Rejoin Room" }));
+    const form = getForm("join");
+    const usernameInput = within(form).getByLabelText("Username") as HTMLInputElement;
 
-    codeInput.value = "zzzzzz";
-    codeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    fireEvent.input(within(form).getByLabelText("Room Code"), { target: { value: "zzzzzz" } });
 
     expect(usernameInput.value).toBe("");
   });
@@ -101,16 +115,15 @@ describe("join room", () => {
 
     showRoomGate();
 
-    document.querySelector<HTMLButtonElement>('[data-tab="join"]')!.click();
-    const joinForm = document.querySelector<HTMLFormElement>('[data-form="join"]')!;
-    joinForm.querySelector<HTMLInputElement>('input[name="code"]')!.value = "ABCDEF";
-    joinForm.querySelector<HTMLInputElement>('input[name="username"]')!.value = "admin";
-    submit(joinForm);
+    fireEvent.click(screen.getByRole("button", { name: "Join / Rejoin Room" }));
+    const form = getForm("join");
+    fireEvent.input(within(form).getByLabelText("Room Code"), { target: { value: "ABCDEF" } });
+    fireEvent.input(within(form).getByLabelText("Username"), { target: { value: "admin" } });
+    fireEvent.submit(form);
     await flush();
 
-    const passwordField = joinForm.querySelector<HTMLElement>("[data-password-field]")!;
-    expect(passwordField.hidden).toBe(false);
-    expect(document.querySelector('[data-error="join"]')!.textContent).toBe(message);
+    expect(form.querySelector<HTMLElement>("[data-password-field]")!.hidden).toBe(false);
+    expect(screen.getByText(message)).toBeTruthy();
   });
 
   it("resolves and remembers the username on a successful join", async () => {
@@ -119,11 +132,11 @@ describe("join room", () => {
 
     const roomPromise = showRoomGate();
 
-    document.querySelector<HTMLButtonElement>('[data-tab="join"]')!.click();
-    const joinForm = document.querySelector<HTMLFormElement>('[data-form="join"]')!;
-    joinForm.querySelector<HTMLInputElement>('input[name="code"]')!.value = "ABCDEF";
-    joinForm.querySelector<HTMLInputElement>('input[name="username"]')!.value = "bob";
-    submit(joinForm);
+    fireEvent.click(screen.getByRole("button", { name: "Join / Rejoin Room" }));
+    const form = getForm("join");
+    fireEvent.input(within(form).getByLabelText("Room Code"), { target: { value: "ABCDEF" } });
+    fireEvent.input(within(form).getByLabelText("Username"), { target: { value: "bob" } });
+    fireEvent.submit(form);
     await flush();
 
     await expect(roomPromise).resolves.toBe(fakeRoom);
@@ -137,13 +150,13 @@ describe("create room error", () => {
 
     showRoomGate();
 
-    const createForm = document.querySelector<HTMLFormElement>('[data-form="create"]')!;
-    createForm.querySelector<HTMLInputElement>('input[name="username"]')!.value = "alice";
-    submit(createForm);
+    const form = getForm("create");
+    fireEvent.input(within(form).getByLabelText("Username"), { target: { value: "alice" } });
+    fireEvent.submit(form);
     await flush();
 
-    expect(document.querySelector('[data-error="create"]')!.textContent).toBe("Something broke.");
-    expect(document.querySelector<HTMLElement>("[data-created]")!.hidden).toBe(true);
+    expect(screen.getByText("Something broke.")).toBeTruthy();
+    expect(document.querySelector("[data-created]")).toBeNull();
   });
 });
 
@@ -154,12 +167,12 @@ describe("continue after room creation", () => {
 
     const roomPromise = showRoomGate();
 
-    const createForm = document.querySelector<HTMLFormElement>('[data-form="create"]')!;
-    createForm.querySelector<HTMLInputElement>('input[name="username"]')!.value = "alice";
-    submit(createForm);
+    const form = getForm("create");
+    fireEvent.input(within(form).getByLabelText("Username"), { target: { value: "alice" } });
+    fireEvent.submit(form);
     await flush();
 
-    document.querySelector<HTMLButtonElement>("[data-continue]")!.click();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     await expect(roomPromise).resolves.toBe(fakeRoom);
     expect(document.getElementById("room-gate")).toBeNull();
@@ -171,10 +184,10 @@ describe("copy buttons", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 
-    await createRoomAndGetCreatedSection();
+    await createRoomAndGetCreatedPanel();
 
     const copyCodeButton = document.querySelector<HTMLButtonElement>('[data-copy="code"]')!;
-    copyCodeButton.click();
+    fireEvent.click(copyCodeButton);
     await flush();
 
     expect(writeText).toHaveBeenCalledWith("ABCDEF");
@@ -186,10 +199,10 @@ describe("copy buttons", () => {
     // navigator.clipboard is undefined by default in jsdom, so no need to unset it here.
     document.execCommand = vi.fn(() => true);
 
-    await createRoomAndGetCreatedSection();
+    await createRoomAndGetCreatedPanel();
 
     const copyLinkButton = document.querySelector<HTMLButtonElement>('[data-copy="link"]')!;
-    copyLinkButton.click();
+    fireEvent.click(copyLinkButton);
     await flush();
 
     expect(document.execCommand).toHaveBeenCalledWith("copy");
@@ -198,10 +211,10 @@ describe("copy buttons", () => {
 
   it("shows 'Copy failed' when neither the Clipboard API nor execCommand succeed", async () => {
     // Both navigator.clipboard and document.execCommand are unavailable by default in jsdom.
-    await createRoomAndGetCreatedSection();
+    await createRoomAndGetCreatedPanel();
 
     const copyPasswordButton = document.querySelector<HTMLButtonElement>('[data-copy="password"]')!;
-    copyPasswordButton.click();
+    fireEvent.click(copyPasswordButton);
     await flush();
 
     expect(copyPasswordButton.textContent).toBe("Copy failed");
@@ -218,9 +231,9 @@ describe("join via link", () => {
 
     showRoomGate();
 
-    expect(document.querySelector<HTMLElement>("[data-link-join]")!.hidden).toBe(false);
-    expect(document.querySelector<HTMLElement>("[data-tabs-mode]")!.hidden).toBe(true);
-    expect(document.querySelector("[data-link-code]")!.textContent).toBe("ABCDEF");
+    expect(document.querySelector("[data-link-join]")).not.toBeNull();
+    expect(document.querySelector("[data-tabs-mode]")).toBeNull();
+    expect(screen.getByText("ABCDEF")).toBeTruthy();
   });
 
   it("pre-fills the remembered username for that room", () => {
@@ -229,9 +242,7 @@ describe("join via link", () => {
 
     showRoomGate();
 
-    const usernameInput = document.querySelector<HTMLInputElement>(
-      '[data-form="link-join"] input[name="username"]',
-    )!;
+    const usernameInput = screen.getByLabelText("Username") as HTMLInputElement;
     expect(usernameInput.value).toBe("carol");
   });
 
@@ -242,9 +253,8 @@ describe("join via link", () => {
 
     const roomPromise = showRoomGate();
 
-    const form = document.querySelector<HTMLFormElement>('[data-form="link-join"]')!;
-    form.querySelector<HTMLInputElement>('input[name="username"]')!.value = "dave";
-    submit(form);
+    fireEvent.input(screen.getByLabelText("Username"), { target: { value: "dave" } });
+    fireEvent.submit(getForm("link-join"));
     await flush();
 
     expect(mockJoinRoom).toHaveBeenCalledWith("ABCDEF", "dave", undefined);
@@ -259,13 +269,11 @@ describe("join via link", () => {
 
     showRoomGate();
 
-    const form = document.querySelector<HTMLFormElement>('[data-form="link-join"]')!;
-    form.querySelector<HTMLInputElement>('input[name="username"]')!.value = "eve";
-    submit(form);
+    fireEvent.input(screen.getByLabelText("Username"), { target: { value: "eve" } });
+    fireEvent.submit(getForm("link-join"));
     await flush();
 
-    const passwordField = form.querySelector<HTMLElement>("[data-password-field]")!;
-    expect(passwordField.hidden).toBe(false);
-    expect(document.querySelector('[data-error="link-join"]')!.textContent).toBe(message);
+    expect(document.querySelector<HTMLElement>("[data-password-field]")!.hidden).toBe(false);
+    expect(screen.getByText(message)).toBeTruthy();
   });
 });

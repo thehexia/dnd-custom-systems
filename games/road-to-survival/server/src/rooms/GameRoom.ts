@@ -9,19 +9,20 @@ import {
 } from "../db/rooms.js";
 import { GameState, PlayerState } from "./schema/GameState.js";
 import { verifyRoomPassword } from "./roomCredentials.js";
+import { normalizeDaysPerWeek, totalSegments } from "./timeline.js";
 
 const GENERIC_ACCESS_ERROR = "Invalid room code or password.";
 const ADMIN_PASSWORD_REQUIRED_ERROR = "This is the room creator's username. Enter the room password to reconnect as them.";
 const FLUSH_INTERVAL_MS = 5000;
 
-interface MoveMessage {
-  x: number;
-  y: number;
+interface ResolveWeekEndMessage {
+  outcome: "continue" | "death";
 }
 
 interface CreateOptions {
   action: "create";
   username: string;
+  daysPerWeek?: number;
 }
 
 interface JoinOptions {
@@ -56,6 +57,11 @@ export class GameRoom extends Room<GameState> {
       this.passwordHash = room.passwordHash;
       this.pendingPassword = password;
       this.creatorUsername = options.username;
+      // Days-per-week is only configurable at creation and is not persisted to Postgres -- if
+      // this room's live process fully disposes and a later rejoin has to recreate it (see
+      // onAuth/onJoin's "join" branch below), the timeline resets to defaults. Accepted for now
+      // per design.md's Non-Goals (no cross-session timeline persistence).
+      this.state.timeline.daysPerWeek = normalizeDaysPerWeek(options.daysPerWeek);
 
       const adminPlayer = await createRoomPlayer(room.id, options.username, true);
       this.creatorRoomPlayerId = adminPlayer.id;
@@ -69,14 +75,52 @@ export class GameRoom extends Room<GameState> {
       this.passwordHash = room.passwordHash;
     }
 
-    this.onMessage<MoveMessage>("move", (client, message) => {
+    this.onMessage("ready", (client) => {
+      if (this.state.timeline.phase !== "active") return;
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      player.x = message.x;
-      player.y = message.y;
+      player.ready = true;
+      this.maybeAdvance();
+    });
+
+    this.onMessage<ResolveWeekEndMessage>("resolve-week-end", (client, message) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player?.isAdmin) return;
+      if (this.state.timeline.phase !== "week-end") return;
+
+      if (message.outcome === "continue") {
+        this.state.timeline.week += 1;
+        this.state.timeline.segment = 1;
+        this.state.timeline.phase = "active";
+        for (const p of this.state.players.values()) p.ready = false;
+      } else if (message.outcome === "death") {
+        this.state.timeline.phase = "game-over";
+      }
     });
 
     this.clock.setInterval(() => this.flushState(), FLUSH_INTERVAL_MS);
+  }
+
+  /**
+   * Advances the shared timeline once every currently connected player is ready: increments the
+   * segment, or -- on the week's last segment -- enters the week-end decision state instead of
+   * advancing further (see specs/road-to-survival-timeline-board's Segment Advances / Week-End
+   * Decision Point requirements).
+   */
+  private maybeAdvance(): void {
+    const { timeline } = this.state;
+    if (timeline.phase !== "active") return;
+
+    const players = [...this.state.players.values()];
+    if (players.length === 0 || !players.every((p) => p.ready)) return;
+
+    const total = totalSegments(timeline.daysPerWeek);
+    if (timeline.segment < total) {
+      timeline.segment += 1;
+    } else {
+      timeline.phase = "week-end";
+    }
+    for (const p of players) p.ready = false;
   }
 
   async onAuth(_client: Client, options: GameRoomOptions, _context: AuthContext) {
@@ -144,6 +188,7 @@ export class GameRoom extends Room<GameState> {
     await this.persistSession(client.sessionId);
     this.state.players.delete(client.sessionId);
     this.roomPlayerIdBySession.delete(client.sessionId);
+    this.maybeAdvance();
     console.log(`${client.sessionId} left ${this.roomId}`);
   }
 

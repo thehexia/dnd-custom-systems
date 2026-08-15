@@ -33,7 +33,7 @@ Multiplayer game: [Phaser 3](https://phaser.io/) client + [Colyseus](https://col
    - Server: ws://localhost:2567 (monitor at http://localhost:2567/monitor)
    - Client: http://localhost:5173
 
-Click anywhere on the game canvas to move your square — state is synced across all connected clients via Colyseus.
+The room shares one timeline: each day is split into a day segment and a night segment, and a week is 5 days by default (the admin can set a different number of days per week when creating the room). Click "Ready" when you're ready for the current segment — once every connected player is ready, the timeline advances. At the end of the week, the room admin decides whether the party continues to the next week or the game ends. All of this is synced across every connected client via Colyseus.
 
 ## Testing
 

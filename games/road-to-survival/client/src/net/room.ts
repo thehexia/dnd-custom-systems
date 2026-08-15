@@ -52,10 +52,14 @@ function toRoomAccessError(err: unknown): RoomAccessError {
   return new RoomAccessError("unknown", message);
 }
 
-export function createRoom(username: string): Promise<CreateRoomResult> {
+export function createRoom(username: string, daysPerWeek?: number): Promise<CreateRoomResult> {
   return new Promise((resolve, reject) => {
+    const options =
+      daysPerWeek === undefined
+        ? { action: "create" as const, username }
+        : { action: "create" as const, username, daysPerWeek };
     client
-      .create("game", { action: "create", username })
+      .create("game", options)
       .then((room) => {
         room.onMessage<{ code: string; password: string }>("room-created", (data) => {
           resolve({ room, code: data.code, password: data.password });

@@ -16,20 +16,37 @@ export async function fillAndSubmit(
 }
 
 interface PlayerSnapshot {
-  x: number;
-  y: number;
   isAdmin: boolean;
+  ready: boolean;
+}
+
+// room.state's nested fields (e.g. `timeline`) can briefly be undefined right after joinById
+// resolves, before the first full state sync is decoded -- wait for it so callers can safely
+// read `room.state.timeline.*` right away instead of racing it.
+function waitForTimeline(room: Room): Promise<void> {
+  return new Promise((resolve) => {
+    function check() {
+      if (room.state.timeline) {
+        resolve();
+      } else {
+        room.onStateChange.once(check);
+      }
+    }
+    check();
+  });
 }
 
 /**
- * Connects a plain colyseus.js client (not a browser) to the room as an independent observer
- * and tracks the synced state for the given usernames, keyed by username. Used to assert on the
- * server's authoritative state -- the same state real clients render from -- without depending
- * on Phaser canvas pixel inspection.
+ * Connects a plain colyseus.js client (not a browser) to the room as an independent observer and
+ * tracks the synced state for the given usernames, keyed by username, plus exposes the room so
+ * callers can read the shared `state.timeline` (week/segment/phase) directly -- colyseus.js
+ * mutates that schema instance in place as patches arrive, so no extra plumbing is needed to keep
+ * it live. Used to assert on the server's authoritative state -- the same state real clients
+ * render from -- without depending on Phaser canvas pixel inspection.
  */
 export async function observeRoom(code: string): Promise<{
   room: Room;
-  snapshots: Map<string, PlayerSnapshot>;
+  players: Map<string, PlayerSnapshot>;
 }> {
   const client = new Client(SERVER_URL);
   const room = await client.joinById(code, {
@@ -37,15 +54,16 @@ export async function observeRoom(code: string): Promise<{
     code,
     username: `e2e-observer-${Date.now()}`,
   });
+  await waitForTimeline(room);
 
-  const snapshots = new Map<string, PlayerSnapshot>();
+  const players = new Map<string, PlayerSnapshot>();
   const $ = getStateCallbacks(room);
 
   $(room.state).players.onAdd((player) => {
-    const sync = () => snapshots.set(player.username, { x: player.x, y: player.y, isAdmin: player.isAdmin });
+    const sync = () => players.set(player.username, { isAdmin: player.isAdmin, ready: player.ready });
     sync();
     $(player).onChange(sync);
   });
 
-  return { room, snapshots };
+  return { room, players };
 }

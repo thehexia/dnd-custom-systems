@@ -42,6 +42,19 @@ describe("createRoom", () => {
     expect(result).toEqual({ room: fakeRoom, code: "ABC123", password: "s3cret" });
   });
 
+  it("includes daysPerWeek in the create options when provided", async () => {
+    const fakeRoom = {
+      onMessage: vi.fn((type: string, cb: (data: unknown) => void) => {
+        if (type === "room-created") cb({ code: "ABC123", password: "s3cret" });
+      }),
+    };
+    mockCreate.mockResolvedValueOnce(fakeRoom);
+
+    await createRoom("alice", 3);
+
+    expect(mockCreate).toHaveBeenCalledWith("game", { action: "create", username: "alice", daysPerWeek: 3 });
+  });
+
   it("maps an unrecognized server error to a generic RoomAccessError", async () => {
     mockCreate.mockRejectedValueOnce(
       serverError(ErrorCode.MATCHMAKE_UNHANDLED, "Something else broke."),
