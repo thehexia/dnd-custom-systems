@@ -22,7 +22,7 @@ Promise.all([showRoomGate(), themeFontsReady]).then(([room]) => {
     parent: "app",
     width: 1100,
     height: 750,
-    backgroundColor: "#2b1f14",
+    backgroundColor: "#141110",
     scene: [],
   });
 

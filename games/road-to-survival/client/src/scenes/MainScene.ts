@@ -11,34 +11,37 @@ const NAV_RIGHT_MARGIN = 40;
 const NAV_TOP = 140;
 const NAV_BOTTOM_MARGIN = 40;
 const TILE_GAP = 22;
-const TILE_RADIUS = 12;
+const TILE_BEVEL = 10;
 const MIN_TILE_HEIGHT = 28;
 
 const WEEK_TEXT_TOP = 36;
 const JUMP_BUTTON_TOP = 86;
 
-// The selected/viewed segment's content area is presented as its own card, matching the
-// wood-panel treatment used for the DOM surfaces (room gate, HUD) instead of floating text
-// directly on the board background.
+// The selected/viewed segment's content area is presented as its own card, matching the dark
+// glass + gold accent + bevelled-corner treatment used for the DOM surfaces (room gate, HUD)
+// instead of floating text directly on the board background.
 const CARD_LEFT = 28;
 const CARD_TOP = 28;
 const CARD_RIGHT_GAP = 28;
 const CARD_BOTTOM_MARGIN = 40;
-const CARD_RADIUS = 14;
-const CARD_BORDER_WIDTH = 4;
-const CARD_FILL = 0x3a2a1a;
-const CARD_WOOD_ALPHA = 0.2;
+const CARD_BEVEL = 20;
+const CARD_BORDER_WIDTH = 1;
+const CARD_ACCENT_WIDTH = 4;
 
-const DAY_FILL = 0xe8c784;
-const NIGHT_FILL = 0x2e3a59;
-const BORDER = 0x4a2e1d;
-const CURRENT_BORDER = 0xf2b705;
+const PANEL_FILL = 0x181410;
+const PANEL_FILL_ALPHA = 0.94;
+const PANEL_BORDER = 0xffc61a;
+const PANEL_BORDER_ALPHA = 0.28;
+const ACCENT = 0xffc61a;
+
+const DAY_FILL = 0xf2c14e;
+const NIGHT_FILL = 0x232a42;
+const BORDER = 0x4a4030;
+const CURRENT_BORDER = 0xffc61a;
 const SELECTED_BORDER = 0x59c1f2;
 
-const WOOD_TEXTURE_KEY = "wood-grain";
-const WOOD_OVERLAY_ALPHA = 0.25;
-const DAY_ICON_TINT = 0x4a2e1d;
-const NIGHT_ICON_TINT = 0xf2e6c9;
+const DAY_ICON_TINT = 0x2b1f14;
+const NIGHT_ICON_TINT = 0xfdf4dd;
 
 const FONT_DISPLAY = "MedievalSharp";
 const FONT_BODY = "IM Fell English";
@@ -50,6 +53,20 @@ interface NavLayout {
   total: number;
 }
 
+// A rectangle with its top-left and bottom-right corners sliced off, matching the CSS
+// clip-path used for the DOM glass panels -- gives Graphics.fillPoints/strokePoints a shape
+// to draw instead of a plain or rounded rect.
+function bevelledRectPoints(x: number, y: number, width: number, height: number, cut: number): Phaser.Types.Math.Vector2Like[] {
+  return [
+    { x: x + cut, y },
+    { x: x + width, y },
+    { x: x + width, y: y + height - cut },
+    { x: x + width - cut, y: y + height },
+    { x, y: y + height },
+    { x, y: y + cut },
+  ];
+}
+
 export class MainScene extends Phaser.Scene {
   private room!: Room;
   private track!: Phaser.GameObjects.Graphics;
@@ -57,7 +74,6 @@ export class MainScene extends Phaser.Scene {
   private dayText!: Phaser.GameObjects.Text;
   private jumpButton!: Phaser.GameObjects.Text;
   private tileZones: Phaser.GameObjects.Zone[] = [];
-  private tileTextures: Phaser.GameObjects.TileSprite[] = [];
   private tileIcons: Phaser.GameObjects.Image[] = [];
   private navLayout: NavLayout | null = null;
   private selectedSegment: number | null = null;
@@ -72,7 +88,6 @@ export class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image(WOOD_TEXTURE_KEY, "/theme/textures/wood-grain.png");
     this.load.svg("sun", "/theme/icons/sun.svg", { width: 64, height: 64 });
     this.load.svg("moon", "/theme/icons/moon.svg", { width: 64, height: 64 });
   }
@@ -84,7 +99,7 @@ export class MainScene extends Phaser.Scene {
     this.weekText = this.add.text(0, WEEK_TEXT_TOP, "", {
       fontSize: "24px",
       fontFamily: FONT_DISPLAY,
-      color: "#f2e6c9",
+      color: "#fdf4dd",
     });
     this.jumpButton = this.add
       .text(0, JUMP_BUTTON_TOP, "▲ Jump to current day", {
@@ -101,7 +116,7 @@ export class MainScene extends Phaser.Scene {
     this.dayText = this.add.text(CONTENT_LEFT, CONTENT_TOP, "", {
       fontSize: "28px",
       fontFamily: FONT_DISPLAY,
-      color: "#f2e6c9",
+      color: "#fdf4dd",
     });
 
     // room.state's nested fields (timeline, players) can briefly be undefined right after
@@ -124,18 +139,18 @@ export class MainScene extends Phaser.Scene {
   private drawContentCard(): void {
     const width = this.navX() - CARD_RIGHT_GAP - CARD_LEFT;
     const height = this.scale.height - CARD_TOP - CARD_BOTTOM_MARGIN;
+    const points = bevelledRectPoints(CARD_LEFT, CARD_TOP, width, height, CARD_BEVEL);
 
     const card = this.add.graphics();
-    card.fillStyle(CARD_FILL, 1);
-    card.fillRoundedRect(CARD_LEFT, CARD_TOP, width, height, CARD_RADIUS);
-    card.lineStyle(CARD_BORDER_WIDTH, BORDER, 1);
-    card.strokeRoundedRect(CARD_LEFT, CARD_TOP, width, height, CARD_RADIUS);
+    card.fillStyle(PANEL_FILL, PANEL_FILL_ALPHA);
+    card.fillPoints(points, true);
+    card.lineStyle(CARD_BORDER_WIDTH, PANEL_BORDER, PANEL_BORDER_ALPHA);
+    card.strokePoints(points, true);
 
-    this.add
-      .tileSprite(CARD_LEFT, CARD_TOP, width, height, WOOD_TEXTURE_KEY)
-      .setOrigin(0, 0)
-      .setAlpha(CARD_WOOD_ALPHA)
-      .setBlendMode(Phaser.BlendModes.MULTIPLY);
+    // Gold left accent edge, matching the DOM glass panels' border-left -- drawn along the
+    // shape's straight left edge only, between the top bevel cut and the bottom-left corner.
+    card.fillStyle(ACCENT, 1);
+    card.fillRect(CARD_LEFT, CARD_TOP + CARD_BEVEL, CARD_ACCENT_WIDTH, height - CARD_BEVEL);
   }
 
   private whenTimelineReady(callback: () => void): void {
@@ -170,15 +185,6 @@ export class MainScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true })
         .on("pointerdown", () => this.selectSegment(i));
       this.tileZones.push(zone);
-
-      // Wood-grain overlay on top of the tile's Graphics fill (see design.md - Decisions).
-      // Tile geometry is fixed for the room's lifetime, so this is created once, not redrawn.
-      const wood = this.add
-        .tileSprite(navX, y, NAV_TILE_WIDTH, tileHeight, WOOD_TEXTURE_KEY)
-        .setOrigin(0, 0)
-        .setAlpha(WOOD_OVERLAY_ALPHA)
-        .setBlendMode(Phaser.BlendModes.MULTIPLY);
-      this.tileTextures.push(wood);
 
       const timeOfDay = describeSegment(i).timeOfDay;
       const iconKey = iconKeyForTimeOfDay(timeOfDay);
@@ -260,18 +266,20 @@ export class MainScene extends Phaser.Scene {
       const visual = tileVisualState(i, segment, this.selectedSegment);
       const fill = visual.timeOfDay === "day" ? DAY_FILL : NIGHT_FILL;
       const alpha = visual.isCompleted ? 0.5 : visual.isCurrent ? 1 : 0.35;
+      const bevel = Math.min(TILE_BEVEL, tileHeight / 2);
+      const points = bevelledRectPoints(navX, y, NAV_TILE_WIDTH, tileHeight, bevel);
 
       this.track.fillStyle(fill, alpha);
-      this.track.fillRoundedRect(navX, y, NAV_TILE_WIDTH, tileHeight, TILE_RADIUS);
+      this.track.fillPoints(points, true);
 
       if (visual.isCurrent) {
-        this.track.lineStyle(6, CURRENT_BORDER, 1);
+        this.track.lineStyle(4, CURRENT_BORDER, 1);
       } else if (visual.isSelected) {
-        this.track.lineStyle(6, SELECTED_BORDER, 1);
+        this.track.lineStyle(4, SELECTED_BORDER, 1);
       } else {
-        this.track.lineStyle(3, BORDER, 1);
+        this.track.lineStyle(2, BORDER, 1);
       }
-      this.track.strokeRoundedRect(navX, y, NAV_TILE_WIDTH, tileHeight, TILE_RADIUS);
+      this.track.strokePoints(points, true);
     }
   }
 }
