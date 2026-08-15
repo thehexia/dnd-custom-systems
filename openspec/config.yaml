@@ -13,8 +13,14 @@ context: |
   games/road-to-survival — multiplayer game (client + server share one domain, see above)
     - client/: Phaser 3 + Vite + TypeScript (games/road-to-survival/client)
     - server/: Colyseus + Express + TypeScript, Prisma -> Postgres (games/road-to-survival/server)
-    - npm workspaces defined in games/road-to-survival/package.json ("client", "server")
-    - local Postgres via games/road-to-survival/docker-compose.yml
+    - npm workspaces defined in games/road-to-survival/package.json ("client", "server", "e2e")
+    - local Postgres via games/road-to-survival/docker-compose.yml (dev only; tests use Testcontainers)
+    - Testing stack: Vitest for unit tests (co-located `src/**/*.test.ts` in each workspace) and
+      integration tests (`src/**/*.integration.test.ts` in server/, against a real Postgres
+      provisioned via Testcontainers -- see server/vitest.integration.config.ts); Playwright for
+      end-to-end tests in the e2e/ workspace. Run via `npm run test` / `test:unit` /
+      `test:integration` / `test:e2e` from games/road-to-survival/. Do not introduce a second
+      test framework for this project without a strong reason -- extend the existing suites.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
@@ -25,6 +31,13 @@ context: |
 #       - Always include a "Non-goals" section
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
+rules:
+  tasks:
+    - Any task that introduces or changes behavior must include a corresponding unit and/or
+      integration test task in the same change -- do not leave testing as unstated follow-up work.
+    - New or changed code that touches Postgres (via Prisma) must be covered by an integration
+      test against a real database (e.g. Testcontainers for road-to-survival), not only a unit
+      test with the database mocked.
 
 # Per-operation guidance (optional)
 # Add advisory guidance for how apply and archive work should be conducted.

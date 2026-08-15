@@ -35,6 +35,15 @@ Multiplayer game: [Phaser 3](https://phaser.io/) client + [Colyseus](https://col
 
 Click anywhere on the game canvas to move your square — state is synced across all connected clients via Colyseus.
 
+## Testing
+
+- `npm run test:unit` — Vitest unit tests for `server/` and `client/`. No Docker or running services required.
+- `npm run test:integration` — Vitest integration tests for `server/` against a real Postgres. Requires Docker: the suite provisions and tears down its own `postgres:16-alpine` container via [Testcontainers](https://testcontainers.com/), independent of `docker-compose.yml`/the dev database.
+- `npm run test:e2e` — Playwright end-to-end tests that drive the real client in a browser against a real server and a Testcontainers-provisioned Postgres. Requires Docker.
+- `npm run test` — runs all three suites in sequence.
+
+Docker Desktop (or another local Docker daemon) must be running for `test:integration` and `test:e2e`; `test:unit` does not need it.
+
 ## Useful commands
 
 - `npm run docker:down` — stop Postgres

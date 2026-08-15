@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "client",
-    "server"
+    "server",
+    "e2e"
   ],
   "overrides": {
     "@colyseus/core": "0.16.24"
@@ -18,6 +19,11 @@
     "docker:logs": "docker compose logs -f postgres",
     "prisma:generate": "npm run prisma:generate --workspace=server",
     "prisma:migrate": "npm run prisma:migrate --workspace=server",
-    "prisma:studio": "npm run prisma:studio --workspace=server"
+    "prisma:studio": "npm run prisma:studio --workspace=server",
+    "test": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "test:unit": "npm run test --workspace=server && npm run test --workspace=client",
+    "test:integration": "npm run test:integration --workspace=server",
+    "test:e2e": "npm run test --workspace=e2e",
+    "test:coverage": "npm run test:coverage --workspace=server && npm run test:coverage --workspace=client"
   }
 }

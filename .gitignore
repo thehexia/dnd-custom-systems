@@ -427,3 +427,9 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Node build output and test artifacts (games/*/)
+dist/
+coverage/
+playwright-report/
+test-results/
