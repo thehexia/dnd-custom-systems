@@ -4,7 +4,6 @@ import { Server } from "colyseus";
 import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
-import { prisma } from "./db/prisma.js";
 import { GameRoom } from "./rooms/GameRoom.js";
 
 const port = Number(process.env.SERVER_PORT ?? 2567);
@@ -14,11 +13,6 @@ app.use(express.json());
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
-});
-
-app.get("/players", async (_req, res) => {
-  const players = await prisma.player.findMany({ orderBy: { createdAt: "desc" } });
-  res.json(players);
 });
 
 app.use("/monitor", monitor());

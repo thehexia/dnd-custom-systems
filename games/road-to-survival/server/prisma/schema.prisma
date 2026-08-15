@@ -7,9 +7,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Player {
+model Room {
+  id           String       @id @default(uuid())
+  code         String       @unique
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  players      RoomPlayer[]
+}
+
+model RoomPlayer {
   id        String   @id @default(uuid())
-  username  String   @unique
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id])
+  username  String
+  isAdmin   Boolean  @default(false)
+  x         Float    @default(0)
+  y         Float    @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([roomId, username])
 }

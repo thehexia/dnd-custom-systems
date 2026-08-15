@@ -7,6 +7,89 @@
     <style>
       html, body { margin: 0; padding: 0; background: #111; }
       #app { display: flex; justify-content: center; align-items: center; height: 100vh; }
+
+      #room-gate {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.75);
+        font-family: system-ui, sans-serif;
+        color: #eee;
+        z-index: 10;
+      }
+      .room-gate-panel {
+        background: #1d1d1d;
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 24px;
+        width: 320px;
+      }
+      .room-gate-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+      .room-gate-tabs button {
+        flex: 1;
+        padding: 8px;
+        background: #2a2a2a;
+        border: 1px solid #444;
+        color: #ccc;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .room-gate-tabs button.active { background: #3ddc97; color: #111; border-color: #3ddc97; }
+      .room-gate-form { display: flex; flex-direction: column; gap: 12px; }
+      .room-gate-form label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+      #room-gate [hidden] { display: none !important; }
+      .room-gate-form input {
+        padding: 8px;
+        background: #111;
+        border: 1px solid #444;
+        color: #eee;
+        border-radius: 4px;
+      }
+      .room-gate-form button[type="submit"] {
+        padding: 10px;
+        background: #3ddc97;
+        border: none;
+        border-radius: 4px;
+        color: #111;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .room-gate-error { color: #f25f5c; font-size: 13px; min-height: 16px; margin: 0; }
+      .room-gate-created p { font-size: 14px; }
+      .room-gate-created [data-continue] {
+        padding: 10px;
+        width: 100%;
+        background: #3ddc97;
+        border: none;
+        border-radius: 4px;
+        color: #111;
+        font-weight: bold;
+        cursor: pointer;
+        margin-top: 8px;
+      }
+      .room-gate-copy-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+        font-size: 14px;
+      }
+      .room-gate-copy-row > span { overflow-wrap: anywhere; min-width: 0; }
+      .room-gate-copy-row [data-copy] {
+        flex-shrink: 0;
+        padding: 5px 10px;
+        background: #2a2a2a;
+        border: 1px solid #444;
+        color: #ccc;
+        cursor: pointer;
+        border-radius: 4px;
+        font-size: 12px;
+        min-width: 52px;
+      }
+      .room-gate-copy-row [data-copy]:hover { background: #333; }
     </style>
   </head>
   <body>

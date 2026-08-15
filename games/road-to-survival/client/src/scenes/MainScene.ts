@@ -1,10 +1,9 @@
 import type { Room } from "colyseus.js";
 import { getStateCallbacks } from "colyseus.js";
 import Phaser from "phaser";
-import { joinGameRoom } from "../net/room";
 
 export class MainScene extends Phaser.Scene {
-  private room?: Room;
+  private room!: Room;
   private sprites = new Map<string, Phaser.GameObjects.Rectangle>();
   private mySessionId = "";
 
@@ -12,8 +11,11 @@ export class MainScene extends Phaser.Scene {
     super("main");
   }
 
-  async create() {
-    this.room = await joinGameRoom();
+  init(data: { room: Room }) {
+    this.room = data.room;
+  }
+
+  create() {
     this.mySessionId = this.room.sessionId;
 
     const $ = getStateCallbacks(this.room);
@@ -34,7 +36,7 @@ export class MainScene extends Phaser.Scene {
     });
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      this.room?.send("move", { x: pointer.x, y: pointer.y });
+      this.room.send("move", { x: pointer.x, y: pointer.y });
     });
   }
 }

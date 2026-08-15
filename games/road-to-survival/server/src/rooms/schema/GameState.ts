@@ -2,6 +2,8 @@ import { MapSchema, Schema, type } from "@colyseus/schema";
 
 export class PlayerState extends Schema {
   @type("string") sessionId: string = "";
+  @type("string") username: string = "";
+  @type("boolean") isAdmin: boolean = false;
   @type("number") x: number = 0;
   @type("number") y: number = 0;
 }
