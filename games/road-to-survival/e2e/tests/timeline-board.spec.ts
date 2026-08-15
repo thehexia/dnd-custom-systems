@@ -63,6 +63,28 @@ test("initial load shows Day 1 in the segment content area", async ({ browser })
   }
 });
 
+test("nav bar tiles show sun icons for day-time segments and moon icons for night-time segments", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const pageA = await contextA.newPage();
+
+  try {
+    await pageA.goto("/");
+    await fillAndSubmit(pageA, '[data-form="create"]', { username: "icon-check" });
+    await expect(pageA.locator("[data-created]")).toBeVisible();
+    await pageA.locator("[data-continue]").click();
+    await expect(pageA.locator("canvas")).toBeVisible();
+
+    const tileIconsAttr = await pageA.locator("#app").getAttribute("data-tile-icons");
+    const tileIcons = JSON.parse(tileIconsAttr ?? "[]") as string[];
+
+    // Default 5-day week -> 10 segments, alternating day-time (odd, sun) / night-time (even, moon).
+    expect(tileIcons).toHaveLength(10);
+    expect(tileIcons).toEqual(["sun", "moon", "sun", "moon", "sun", "moon", "sun", "moon", "sun", "moon"]);
+  } finally {
+    await contextA.close();
+  }
+});
+
 test("selecting a nav bar segment does not affect the room, and jump-to-current-day returns to it", async ({
   browser,
 }) => {

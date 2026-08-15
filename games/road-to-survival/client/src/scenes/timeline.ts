@@ -45,6 +45,10 @@ export function tileVisualState(segment: number, currentSegment: number, selecte
   };
 }
 
+export function iconKeyForTimeOfDay(timeOfDay: TimeOfDay): "sun" | "moon" {
+  return timeOfDay === "day" ? "sun" : "moon";
+}
+
 export interface VerticalTileLayout {
   tileHeight: number;
   /** Y offset of each segment's tile from the top of the nav bar, indexed by segment - 1. */

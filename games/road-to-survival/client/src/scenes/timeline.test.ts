@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeVerticalTileLayout, describeSegment, nextSelectedSegment, tileVisualState } from "./timeline";
+import { computeVerticalTileLayout, describeSegment, iconKeyForTimeOfDay, nextSelectedSegment, tileVisualState } from "./timeline";
 
 describe("describeSegment", () => {
   it("reports segment 3 of a default 5-day week as Day 2, day-time", () => {
@@ -54,6 +54,16 @@ describe("tileVisualState", () => {
   it("reports the segment's actual day/night time-of-day", () => {
     expect(tileVisualState(2, 3, 3).timeOfDay).toBe("night");
     expect(tileVisualState(3, 3, 3).timeOfDay).toBe("day");
+  });
+});
+
+describe("iconKeyForTimeOfDay", () => {
+  it("maps day to the sun icon", () => {
+    expect(iconKeyForTimeOfDay("day")).toBe("sun");
+  });
+
+  it("maps night to the moon icon", () => {
+    expect(iconKeyForTimeOfDay("night")).toBe("moon");
   });
 });
 

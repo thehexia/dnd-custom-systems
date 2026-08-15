@@ -5,8 +5,68 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Road to Survival</title>
     <style>
-      html, body { margin: 0; padding: 0; background: #111; }
+      @font-face {
+        font-family: "MedievalSharp";
+        src: url("/theme/fonts/MedievalSharp.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "IM Fell English";
+        src: url("/theme/fonts/IMFellEnglish.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+
+      :root {
+        --theme-bg: #2b1f14;
+        --theme-panel-bg: #3a2a1a;
+        --theme-border: #4a2e1d;
+        --theme-accent: #f2b705;
+        --theme-accent-contrast: #2b1f14;
+        --theme-text: #f2e6c9;
+        --theme-text-muted: #d8c9a3;
+        --theme-danger: #b0453f;
+        --theme-warn: #a1791f;
+        --theme-font-display: "MedievalSharp", cursive;
+        --theme-font-body: "IM Fell English", Georgia, serif;
+      }
+
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--theme-bg) url("/theme/textures/parchment-background.jpg") center / 480px repeat;
+        background-blend-mode: multiply;
+      }
+      body { font-family: var(--theme-font-body); }
       #app { display: flex; justify-content: center; align-items: center; height: 100vh; }
+
+      /* Shared wood-textured, corner-bracketed panel look, applied directly to the room gate
+         and game HUD selectors below (no new markup/classes needed). The panel-fill.png mask
+         clips the wood texture to Kenney's corner-bracket silhouette instead of a plain
+         rectangle. The connection banner is a full-width strip, not a discrete panel, so it
+         gets a simpler wood-tiled treatment further down instead of this bracket mask. */
+      .room-gate-panel, .game-hud {
+        position: relative;
+        border: 3px solid var(--theme-border);
+        border-radius: 8px;
+        color: var(--theme-text);
+        font-family: var(--theme-font-body);
+      }
+      .room-gate-panel::before, .game-hud::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--theme-panel-bg) url("/theme/textures/wood-grain.png") center / 160px repeat;
+        background-blend-mode: multiply;
+        -webkit-mask-image: url("/theme/textures/panel-fill.png");
+        mask-image: url("/theme/textures/panel-fill.png");
+        -webkit-mask-size: 100% 100%;
+        mask-size: 100% 100%;
+        z-index: -1;
+      }
 
       #room-gate {
         position: fixed;
@@ -15,14 +75,9 @@
         justify-content: center;
         align-items: center;
         background: rgba(0, 0, 0, 0.75);
-        font-family: system-ui, sans-serif;
-        color: #eee;
         z-index: 10;
       }
       .room-gate-panel {
-        background: #1d1d1d;
-        border: 1px solid #333;
-        border-radius: 8px;
         padding: 24px;
         width: 320px;
       }
@@ -30,41 +85,45 @@
       .room-gate-tabs button {
         flex: 1;
         padding: 8px;
-        background: #2a2a2a;
-        border: 1px solid #444;
-        color: #ccc;
+        background: transparent;
+        border: 1px solid var(--theme-border);
+        color: var(--theme-text-muted);
+        font-family: var(--theme-font-display);
         cursor: pointer;
         border-radius: 4px;
       }
-      .room-gate-tabs button.active { background: #3ddc97; color: #111; border-color: #3ddc97; }
+      .room-gate-tabs button.active { background: var(--theme-accent); color: var(--theme-accent-contrast); border-color: var(--theme-accent); }
       .room-gate-form { display: flex; flex-direction: column; gap: 12px; }
       .room-gate-form label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
       #room-gate [hidden] { display: none !important; }
       .room-gate-form input {
         padding: 8px;
-        background: #111;
-        border: 1px solid #444;
-        color: #eee;
+        background: rgba(0, 0, 0, 0.25);
+        border: 1px solid var(--theme-border);
+        color: var(--theme-text);
+        font-family: var(--theme-font-body);
         border-radius: 4px;
       }
       .room-gate-form button[type="submit"] {
         padding: 10px;
-        background: #3ddc97;
+        background: var(--theme-accent);
         border: none;
         border-radius: 4px;
-        color: #111;
+        color: var(--theme-accent-contrast);
+        font-family: var(--theme-font-display);
         font-weight: bold;
         cursor: pointer;
       }
-      .room-gate-error { color: #f25f5c; font-size: 13px; min-height: 16px; margin: 0; }
+      .room-gate-error { color: var(--theme-danger); font-size: 13px; min-height: 16px; margin: 0; }
       .room-gate-created p { font-size: 14px; }
       .room-gate-created [data-continue] {
         padding: 10px;
         width: 100%;
-        background: #3ddc97;
+        background: var(--theme-accent);
         border: none;
         border-radius: 4px;
-        color: #111;
+        color: var(--theme-accent-contrast);
+        font-family: var(--theme-font-display);
         font-weight: bold;
         cursor: pointer;
         margin-top: 8px;
@@ -81,15 +140,15 @@
       .room-gate-copy-row [data-copy] {
         flex-shrink: 0;
         padding: 5px 10px;
-        background: #2a2a2a;
-        border: 1px solid #444;
-        color: #ccc;
+        background: transparent;
+        border: 1px solid var(--theme-border);
+        color: var(--theme-text-muted);
         cursor: pointer;
         border-radius: 4px;
         font-size: 12px;
         min-width: 52px;
       }
-      .room-gate-copy-row [data-copy]:hover { background: #333; }
+      .room-gate-copy-row [data-copy]:hover { background: rgba(242, 183, 5, 0.15); }
 
       #game-hud {
         position: fixed;
@@ -97,29 +156,25 @@
         bottom: 24px;
         transform: translateX(-50%);
         z-index: 5;
-        font-family: system-ui, sans-serif;
-        color: #f2e6c9;
       }
       .game-hud {
-        background: rgba(43, 31, 20, 0.92);
-        border: 1px solid #4a2e1d;
-        border-radius: 8px;
         padding: 16px 20px;
         min-width: 240px;
         text-align: center;
       }
-      .game-hud h2 { margin: 0 0 8px; font-size: 16px; }
-      .game-hud p { margin: 0; font-size: 14px; color: #d8c9a3; }
+      .game-hud h2 { margin: 0 0 8px; font-size: 18px; font-family: var(--theme-font-display); }
+      .game-hud p { margin: 0; font-size: 14px; color: var(--theme-text-muted); }
       .game-hud button {
         padding: 8px 16px;
-        background: #f2b705;
+        background: var(--theme-accent);
         border: none;
         border-radius: 4px;
-        color: #2b1f14;
+        color: var(--theme-accent-contrast);
+        font-family: var(--theme-font-display);
         font-weight: bold;
         cursor: pointer;
       }
-      .game-hud button:disabled { background: #8a7454; color: #d8c9a3; cursor: default; }
+      .game-hud button:disabled { background: #8a7454; color: var(--theme-text-muted); cursor: default; }
       .game-hud-actions { display: flex; gap: 8px; justify-content: center; }
       .game-hud-roster {
         list-style: none;
@@ -133,7 +188,7 @@
       .game-hud-roster li[data-ready="true"] { color: #8ee08e; }
 
       #connection-status {
-        font-family: system-ui, sans-serif;
+        font-family: var(--theme-font-body);
       }
       .server-status-badge {
         position: fixed;
@@ -142,7 +197,7 @@
         z-index: 15;
         padding: 4px 10px;
         background: rgba(0, 0, 0, 0.6);
-        color: #9a8b6f;
+        color: var(--theme-text-muted);
         font-size: 11px;
         border-radius: 4px;
         pointer-events: none;
@@ -158,21 +213,63 @@
         align-items: center;
         gap: 12px;
         padding: 10px 16px;
-        background: #7a2e2e;
-        color: #fceee6;
+        background: var(--theme-panel-bg) url("/theme/textures/wood-grain.png") center / 160px repeat;
+        background-blend-mode: multiply;
+        color: var(--theme-text);
+        font-family: var(--theme-font-body);
         font-size: 14px;
         text-align: center;
+        border-bottom: 3px solid var(--theme-danger);
       }
-      .connection-status-banner[data-connection-status="update-available"] { background: #7a5a1a; }
+      .connection-status-banner[data-connection-status="update-available"] { border-bottom-color: var(--theme-warn); }
       .connection-status-banner button {
         padding: 6px 14px;
-        background: #fceee6;
+        background: var(--theme-accent);
         border: none;
         border-radius: 4px;
-        color: #2b1f14;
+        color: var(--theme-accent-contrast);
+        font-family: var(--theme-font-display);
         font-weight: bold;
         cursor: pointer;
       }
+
+      #credits {
+        font-family: var(--theme-font-body);
+      }
+      .credits-widget {
+        position: fixed;
+        bottom: 8px;
+        right: 8px;
+        z-index: 15;
+      }
+      .credits-trigger {
+        padding: 4px 10px;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid var(--theme-border);
+        color: var(--theme-text-muted);
+        font-family: var(--theme-font-body);
+        font-size: 11px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .credits-trigger:hover { color: var(--theme-text); }
+      .credits-panel {
+        position: absolute;
+        bottom: 100%;
+        right: 0;
+        margin-bottom: 8px;
+        width: 260px;
+        padding: 14px 16px;
+        background: var(--theme-panel-bg);
+        border: 1px solid var(--theme-border);
+        border-radius: 6px;
+        color: var(--theme-text);
+        font-size: 13px;
+      }
+      .credits-panel h3 { margin: 0 0 8px; font-size: 15px; font-family: var(--theme-font-display); }
+      .credits-panel ul { margin: 0; padding-left: 18px; }
+      .credits-panel li { margin-bottom: 4px; }
+      .credits-panel a { color: var(--theme-accent); }
     </style>
   </head>
   <body>

@@ -24,7 +24,8 @@ The client currently has two unrelated visual languages: `index.html`'s CSS them
 | Display font (headings, banners, week/day labels) | MedievalSharp | OFL (Google Fonts) | https://fonts.google.com/specimen/MedievalSharp |
 | Body font (roster, buttons, body text) | IM Fell English | OFL (Google Fonts) | https://fonts.google.com/specimen/IM+Fell+English |
 | Parchment background texture | "Parchment background" by Felis Chaus | CC0 | https://opengameart.org/content/parchment-background |
-| Wood-grained panel borders / buttons | Kenney "Fantasy UI Borders" (140 assets) and/or "UI Pack" (430 assets) | CC0 | https://kenney.nl/assets/fantasy-ui-borders, https://kenney.nl/assets/ui-pack |
+| Panel corner-bracket mask shape | Kenney "Fantasy UI Borders" (`panel-001.png`) | CC0 | https://kenney.nl/assets/fantasy-ui-borders |
+| Wood-grain fill texture | "Seamless Wood Textures" (Wood01) by GGBotNet — the Kenney pack above turned out to be untextured line-art frame shapes, not wood-grain art, so a real wood texture was sourced separately to fill those frames/panels | CC0 | https://opengameart.org/content/seamless-wood-textures-0 |
 | Day-time tile icon | "Sun" by lorc | CC BY 3.0 | https://game-icons.net/1x1/lorc/sun.html |
 | Night-time tile icon | "Moon" by lorc | CC BY 3.0 | https://game-icons.net/1x1/lorc/moon.html |
 

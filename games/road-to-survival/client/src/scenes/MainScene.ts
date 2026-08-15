@@ -1,7 +1,7 @@
 import type { Room } from "colyseus.js";
 import { getStateCallbacks } from "colyseus.js";
 import Phaser from "phaser";
-import { computeVerticalTileLayout, describeSegment, nextSelectedSegment, tileVisualState } from "./timeline";
+import { computeVerticalTileLayout, describeSegment, iconKeyForTimeOfDay, nextSelectedSegment, tileVisualState } from "./timeline";
 
 const CONTENT_LEFT = 40;
 const CONTENT_TOP = 40;
@@ -23,6 +23,14 @@ const BORDER = 0x4a2e1d;
 const CURRENT_BORDER = 0xf2b705;
 const SELECTED_BORDER = 0x59c1f2;
 
+const WOOD_TEXTURE_KEY = "wood-grain";
+const WOOD_OVERLAY_ALPHA = 0.25;
+const DAY_ICON_TINT = 0x4a2e1d;
+const NIGHT_ICON_TINT = 0xf2e6c9;
+
+const FONT_DISPLAY = "MedievalSharp";
+const FONT_BODY = "IM Fell English";
+
 interface NavLayout {
   navX: number;
   tileHeight: number;
@@ -37,6 +45,8 @@ export class MainScene extends Phaser.Scene {
   private dayText!: Phaser.GameObjects.Text;
   private jumpButton!: Phaser.GameObjects.Text;
   private tileZones: Phaser.GameObjects.Zone[] = [];
+  private tileTextures: Phaser.GameObjects.TileSprite[] = [];
+  private tileIcons: Phaser.GameObjects.Image[] = [];
   private navLayout: NavLayout | null = null;
   private selectedSegment: number | null = null;
   private lastKnownCurrentSegment: number | null = null;
@@ -49,16 +59,23 @@ export class MainScene extends Phaser.Scene {
     this.room = data.room;
   }
 
+  preload() {
+    this.load.image(WOOD_TEXTURE_KEY, "/theme/textures/wood-grain.png");
+    this.load.svg("sun", "/theme/icons/sun.svg", { width: 64, height: 64 });
+    this.load.svg("moon", "/theme/icons/moon.svg", { width: 64, height: 64 });
+  }
+
   create() {
     this.track = this.add.graphics();
     this.weekText = this.add.text(0, WEEK_TEXT_TOP, "", {
       fontSize: "24px",
+      fontFamily: FONT_DISPLAY,
       color: "#f2e6c9",
-      fontStyle: "bold",
     });
     this.jumpButton = this.add
       .text(0, JUMP_BUTTON_TOP, "▲ Jump to current day", {
         fontSize: "14px",
+        fontFamily: FONT_BODY,
         color: "#9fd3f2",
       })
       .setInteractive({ useHandCursor: true })
@@ -69,8 +86,8 @@ export class MainScene extends Phaser.Scene {
       });
     this.dayText = this.add.text(CONTENT_LEFT, CONTENT_TOP, "", {
       fontSize: "28px",
+      fontFamily: FONT_DISPLAY,
       color: "#f2e6c9",
-      fontStyle: "bold",
     });
 
     // room.state's nested fields (timeline, players) can briefly be undefined right after
@@ -106,6 +123,8 @@ export class MainScene extends Phaser.Scene {
     this.weekText.setX(navX);
     this.jumpButton.setX(navX);
 
+    const tileIconKeys: string[] = [];
+
     for (let i = 1; i <= total; i++) {
       const y = NAV_TOP + positions[i - 1];
       const zone = this.add
@@ -114,6 +133,37 @@ export class MainScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true })
         .on("pointerdown", () => this.selectSegment(i));
       this.tileZones.push(zone);
+
+      // Wood-grain overlay on top of the tile's Graphics fill (see design.md - Decisions).
+      // Tile geometry is fixed for the room's lifetime, so this is created once, not redrawn.
+      const wood = this.add
+        .tileSprite(navX, y, NAV_TILE_WIDTH, tileHeight, WOOD_TEXTURE_KEY)
+        .setOrigin(0, 0)
+        .setAlpha(WOOD_OVERLAY_ALPHA)
+        .setBlendMode(Phaser.BlendModes.MULTIPLY);
+      this.tileTextures.push(wood);
+
+      const timeOfDay = describeSegment(i).timeOfDay;
+      const iconKey = iconKeyForTimeOfDay(timeOfDay);
+      const iconSize = Math.min(tileHeight * 0.7, 32);
+      const icon = this.add
+        .image(navX + NAV_TILE_WIDTH / 2, y + tileHeight / 2, iconKey)
+        .setDisplaySize(iconSize, iconSize)
+        .setTintFill(timeOfDay === "day" ? DAY_ICON_TINT : NIGHT_ICON_TINT);
+      this.tileIcons.push(icon);
+      tileIconKeys.push(iconKey);
+    }
+
+    this.syncTileIconsToDom(tileIconKeys);
+  }
+
+  // Mirrors each tile's fixed sun/moon icon assignment onto the game container as JSON, the
+  // same DOM-mirroring approach used for selectedSegment/segmentLabel -- canvas-rendered icons
+  // have no DOM representation for e2e tests to read otherwise.
+  private syncTileIconsToDom(tileIconKeys: string[]): void {
+    const container = document.getElementById("app");
+    if (container) {
+      container.dataset.tileIcons = JSON.stringify(tileIconKeys);
     }
   }
 
