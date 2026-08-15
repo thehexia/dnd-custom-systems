@@ -1,9 +1,14 @@
 import Phaser from "phaser";
 import { MainScene } from "./scenes/MainScene";
+import { mountConnectionStatus } from "./ui/connectionStatus";
 import { mountGameHud } from "./ui/gameHud";
 import { showRoomGate } from "./ui/roomGate";
 
+const connectionStatus = mountConnectionStatus();
+
 showRoomGate().then((room) => {
+  connectionStatus.setRoom(room);
+
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: "app",

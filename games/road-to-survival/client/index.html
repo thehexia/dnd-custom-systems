@@ -131,6 +131,36 @@
         font-size: 14px;
       }
       .game-hud-roster li[data-ready="true"] { color: #8ee08e; }
+
+      #connection-status {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 20;
+        font-family: system-ui, sans-serif;
+      }
+      .connection-status-banner {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px;
+        background: #7a2e2e;
+        color: #fceee6;
+        font-size: 14px;
+        text-align: center;
+      }
+      .connection-status-banner[data-connection-status="update-available"] { background: #7a5a1a; }
+      .connection-status-banner button {
+        padding: 6px 14px;
+        background: #fceee6;
+        border: none;
+        border-radius: 4px;
+        color: #2b1f14;
+        font-weight: bold;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
