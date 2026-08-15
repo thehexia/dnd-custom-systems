@@ -21,51 +21,44 @@
       }
 
       :root {
-        --theme-bg: #2b1f14;
-        --theme-panel-bg: #3a2a1a;
-        --theme-border: #4a2e1d;
-        --theme-accent: #f2b705;
+        --theme-bg: #ddc28e;
+        --theme-accent: #ffc61a;
         --theme-accent-contrast: #2b1f14;
-        --theme-text: #f2e6c9;
-        --theme-text-muted: #d8c9a3;
-        --theme-danger: #b0453f;
-        --theme-warn: #a1791f;
+        --theme-text: #fdf4dd;
+        --theme-text-muted: #ecdcb3;
+        --theme-danger: #e0665c;
+        --theme-warn: #d9a934;
         --theme-font-display: "MedievalSharp", cursive;
         --theme-font-body: "IM Fell English", Georgia, serif;
+
+        /* Shared "dark glass + gold accent" panel look -- an Overwatch-style HUD treatment
+           (translucent dark glass, angular sliced corners, a gold accent edge) that keeps its
+           fantasy identity through the display/body fonts and warm gold/amber palette rather
+           than through the old wood-grain texture, which read as muddy against these panels. */
+        --panel-bg: linear-gradient(135deg, rgba(26, 22, 18, 0.92), rgba(14, 12, 10, 0.92));
+        --panel-border: rgba(255, 198, 26, 0.28);
+        --panel-shadow: 0 14px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
       }
 
       html, body {
         margin: 0;
         padding: 0;
-        background: var(--theme-bg) url("/theme/textures/parchment-background.jpg") center / 480px repeat;
-        background-blend-mode: multiply;
+        background: var(--theme-bg);
       }
       body { font-family: var(--theme-font-body); }
-      #app { display: flex; justify-content: center; align-items: center; height: 100vh; }
+      #app { display: flex; justify-content: center; align-items: center; height: 100vh; padding-left: 220px; }
 
-      /* Shared wood-textured, corner-bracketed panel look, applied directly to the room gate
-         and game HUD selectors below (no new markup/classes needed). The panel-fill.png mask
-         clips the wood texture to Kenney's corner-bracket silhouette instead of a plain
-         rectangle. The connection banner is a full-width strip, not a discrete panel, so it
-         gets a simpler wood-tiled treatment further down instead of this bracket mask. */
-      .room-gate-panel, .game-hud {
+      .room-gate-panel, .game-hud, .game-roster, .credits-panel {
         position: relative;
-        border: 3px solid var(--theme-border);
-        border-radius: 8px;
         color: var(--theme-text);
         font-family: var(--theme-font-body);
-      }
-      .room-gate-panel::before, .game-hud::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: var(--theme-panel-bg) url("/theme/textures/wood-grain.png") center / 160px repeat;
-        background-blend-mode: multiply;
-        -webkit-mask-image: url("/theme/textures/panel-fill.png");
-        mask-image: url("/theme/textures/panel-fill.png");
-        -webkit-mask-size: 100% 100%;
-        mask-size: 100% 100%;
-        z-index: -1;
+        background: var(--panel-bg);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid var(--panel-border);
+        border-left: 3px solid var(--theme-accent);
+        clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+        box-shadow: var(--panel-shadow);
       }
 
       #room-gate {
@@ -85,12 +78,13 @@
       .room-gate-tabs button {
         flex: 1;
         padding: 8px;
-        background: transparent;
-        border: 1px solid var(--theme-border);
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--panel-border);
         color: var(--theme-text-muted);
         font-family: var(--theme-font-display);
         cursor: pointer;
-        border-radius: 4px;
+        clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px);
+        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
       }
       .room-gate-tabs button.active { background: var(--theme-accent); color: var(--theme-accent-contrast); border-color: var(--theme-accent); }
       .room-gate-form { display: flex; flex-direction: column; gap: 12px; }
@@ -98,36 +92,16 @@
       #room-gate [hidden] { display: none !important; }
       .room-gate-form input {
         padding: 8px;
-        background: rgba(0, 0, 0, 0.25);
-        border: 1px solid var(--theme-border);
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid var(--panel-border);
         color: var(--theme-text);
         font-family: var(--theme-font-body);
         border-radius: 4px;
       }
-      .room-gate-form button[type="submit"] {
-        padding: 10px;
-        background: var(--theme-accent);
-        border: none;
-        border-radius: 4px;
-        color: var(--theme-accent-contrast);
-        font-family: var(--theme-font-display);
-        font-weight: bold;
-        cursor: pointer;
-      }
+      .room-gate-form input:focus { outline: none; border-color: var(--theme-accent); }
       .room-gate-error { color: var(--theme-danger); font-size: 13px; min-height: 16px; margin: 0; }
       .room-gate-created p { font-size: 14px; }
-      .room-gate-created [data-continue] {
-        padding: 10px;
-        width: 100%;
-        background: var(--theme-accent);
-        border: none;
-        border-radius: 4px;
-        color: var(--theme-accent-contrast);
-        font-family: var(--theme-font-display);
-        font-weight: bold;
-        cursor: pointer;
-        margin-top: 8px;
-      }
+      .room-gate-created [data-continue] { margin-top: 8px; }
       .room-gate-copy-row {
         display: flex;
         justify-content: space-between;
@@ -140,52 +114,139 @@
       .room-gate-copy-row [data-copy] {
         flex-shrink: 0;
         padding: 5px 10px;
-        background: transparent;
-        border: 1px solid var(--theme-border);
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--panel-border);
         color: var(--theme-text-muted);
         cursor: pointer;
-        border-radius: 4px;
+        clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px);
         font-size: 12px;
         min-width: 52px;
       }
-      .room-gate-copy-row [data-copy]:hover { background: rgba(242, 183, 5, 0.15); }
+      .room-gate-copy-row [data-copy]:hover { background: rgba(255, 198, 26, 0.15); border-color: var(--theme-accent); }
 
-      #game-hud {
+      .game-hud {
         position: fixed;
         left: 50%;
         bottom: 24px;
         transform: translateX(-50%);
         z-index: 5;
-      }
-      .game-hud {
         padding: 16px 20px;
         min-width: 240px;
         text-align: center;
       }
       .game-hud h2 { margin: 0 0 8px; font-size: 18px; font-family: var(--theme-font-display); }
       .game-hud p { margin: 0; font-size: 14px; color: var(--theme-text-muted); }
-      .game-hud button {
+      .game-hud-actions { display: flex; gap: 8px; justify-content: center; }
+
+      .game-hud button,
+      .game-roster button,
+      .room-gate-form button[type="submit"],
+      .room-gate-created [data-continue],
+      .connection-status-banner button {
         padding: 8px 16px;
+        width: auto;
         background: var(--theme-accent);
         border: none;
-        border-radius: 4px;
         color: var(--theme-accent-contrast);
         font-family: var(--theme-font-display);
         font-weight: bold;
         cursor: pointer;
+        clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px);
+        transition: filter 0.15s ease;
       }
-      .game-hud button:disabled { background: #8a7454; color: var(--theme-text-muted); cursor: default; }
-      .game-hud-actions { display: flex; gap: 8px; justify-content: center; }
-      .game-hud-roster {
+      .room-gate-created [data-continue] { display: block; width: 100%; }
+      .game-hud button:hover:not(:disabled),
+      .game-roster button:hover:not(:disabled),
+      .room-gate-form button[type="submit"]:hover,
+      .room-gate-created [data-continue]:hover,
+      .connection-status-banner button:hover {
+        filter: brightness(1.08);
+      }
+      .game-hud button:disabled, .game-roster button:disabled { background: #8a7454; color: var(--theme-text-muted); cursor: default; filter: none; }
+
+      .game-roster {
+        position: fixed;
+        left: 24px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 5;
+        width: 220px;
+        padding: 16px 18px;
+        text-align: left;
+      }
+      .game-roster-heading {
+        margin: 0 0 10px;
+        font-family: var(--theme-font-display);
+        font-size: 13px;
+        font-weight: normal;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--theme-accent);
+      }
+      .game-roster-list {
         list-style: none;
-        margin: 12px 0 0;
+        margin: 0 0 14px;
         padding: 0;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 6px;
         font-size: 14px;
       }
-      .game-hud-roster li[data-ready="true"] { color: #8ee08e; }
+      .game-roster-tab {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 10px 7px 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-left: 3px solid rgba(255, 255, 255, 0.18);
+        clip-path: polygon(0 0, 100% 0, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      .game-roster-tab[data-ready="true"] {
+        background: rgba(61, 220, 132, 0.12);
+        border-color: rgba(61, 220, 132, 0.35);
+        border-left-color: #3ddc84;
+      }
+      .game-roster-avatar {
+        flex-shrink: 0;
+        width: 26px;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, var(--theme-accent), #b9860a);
+        color: var(--theme-accent-contrast);
+        font-family: var(--theme-font-display);
+        font-weight: bold;
+        font-size: 12px;
+        clip-path: polygon(22% 0, 100% 0, 100% 78%, 78% 100%, 0 100%, 0 22%);
+      }
+      .game-roster-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+        letter-spacing: 0.02em;
+      }
+      .game-roster-status {
+        flex-shrink: 0;
+        padding: 2px 7px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--theme-text-muted);
+        font-size: 9px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px);
+      }
+      .game-roster-tab[data-ready="true"] .game-roster-status {
+        background: #3ddc84;
+        color: #0d2818;
+      }
+      .game-roster button { width: 100%; }
 
       #connection-status {
         font-family: var(--theme-font-body);
@@ -196,10 +257,11 @@
         left: 8px;
         z-index: 15;
         padding: 4px 10px;
-        background: rgba(0, 0, 0, 0.6);
+        background: rgba(14, 12, 10, 0.78);
+        border: 1px solid var(--panel-border);
         color: var(--theme-text-muted);
         font-size: 11px;
-        border-radius: 4px;
+        clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px);
         pointer-events: none;
       }
       .connection-status-banner {
@@ -213,8 +275,9 @@
         align-items: center;
         gap: 12px;
         padding: 10px 16px;
-        background: var(--theme-panel-bg) url("/theme/textures/wood-grain.png") center / 160px repeat;
-        background-blend-mode: multiply;
+        background: linear-gradient(180deg, rgba(20, 17, 14, 0.94), rgba(14, 12, 10, 0.94));
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
         color: var(--theme-text);
         font-family: var(--theme-font-body);
         font-size: 14px;
@@ -222,16 +285,6 @@
         border-bottom: 3px solid var(--theme-danger);
       }
       .connection-status-banner[data-connection-status="update-available"] { border-bottom-color: var(--theme-warn); }
-      .connection-status-banner button {
-        padding: 6px 14px;
-        background: var(--theme-accent);
-        border: none;
-        border-radius: 4px;
-        color: var(--theme-accent-contrast);
-        font-family: var(--theme-font-display);
-        font-weight: bold;
-        cursor: pointer;
-      }
 
       #credits {
         font-family: var(--theme-font-body);
@@ -244,15 +297,15 @@
       }
       .credits-trigger {
         padding: 4px 10px;
-        background: rgba(0, 0, 0, 0.6);
-        border: 1px solid var(--theme-border);
+        background: rgba(14, 12, 10, 0.78);
+        border: 1px solid var(--panel-border);
         color: var(--theme-text-muted);
         font-family: var(--theme-font-body);
         font-size: 11px;
-        border-radius: 4px;
+        clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px);
         cursor: pointer;
       }
-      .credits-trigger:hover { color: var(--theme-text); }
+      .credits-trigger:hover { color: var(--theme-text); border-color: var(--theme-accent); }
       .credits-panel {
         position: absolute;
         bottom: 100%;
@@ -260,10 +313,6 @@
         margin-bottom: 8px;
         width: 260px;
         padding: 14px 16px;
-        background: var(--theme-panel-bg);
-        border: 1px solid var(--theme-border);
-        border-radius: 6px;
-        color: var(--theme-text);
         font-size: 13px;
       }
       .credits-panel h3 { margin: 0 0 8px; font-size: 15px; font-family: var(--theme-font-display); }

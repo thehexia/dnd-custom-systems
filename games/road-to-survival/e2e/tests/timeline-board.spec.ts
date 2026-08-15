@@ -37,14 +37,15 @@ async function createRoomAndJoinSecond(
 }
 
 // Pixel coordinates for the vertical nav bar's canvas-rendered elements, derived from the
-// layout constants in MainScene.ts (canvas is a fixed 800x600 and not CSS-scaled, so page
-// coordinates map 1:1 to game coordinates). Segment 1's tile: default 5-day week -> 10 segments,
-// nav bar right-docked with a 30px margin and 150px tile width -> navX = 620; tiles start at
-// NAV_TOP = 130 with a computed tileHeight of 38px, so tile 1 spans y 130-168 (center ~149) and
-// tile 2 spans y 174-212 (center ~193).
-const TILE_1_CENTER = { x: 695, y: 149 };
-const TILE_2_CENTER = { x: 695, y: 193 };
-const JUMP_TO_CURRENT_DAY = { x: 650, y: 83 };
+// layout constants in MainScene.ts (canvas is a fixed 1100x750 and not CSS-scaled, so page
+// coordinates map 1:1 to game coordinates -- see .click({ position }) calls below, which are
+// element-relative and unaffected by any viewport/scroll overflow). Segment 1's tile: default
+// 5-day week -> 10 segments, nav bar right-docked with a 40px margin and 190px tile width ->
+// navX = 870; tiles start at NAV_TOP = 140 with a computed tileHeight of 35px and a 22px gap,
+// so tile 1 spans y 140-175 (center ~158) and tile 2 spans y 197-232 (center ~215).
+const TILE_1_CENTER = { x: 965, y: 158 };
+const TILE_2_CENTER = { x: 965, y: 215 };
+const JUMP_TO_CURRENT_DAY = { x: 900, y: 95 };
 
 test("initial load shows Day 1 in the segment content area", async ({ browser }) => {
   const contextA = await browser.newContext();

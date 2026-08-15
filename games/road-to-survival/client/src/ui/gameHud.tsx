@@ -67,6 +67,36 @@ function useRoomHudState(room: Room): { players: PlayerSnapshot[]; timeline: Tim
   return { players, timeline };
 }
 
+function PlayerRoster({
+  players,
+  ready,
+}: {
+  players: PlayerSnapshot[];
+  ready?: { disabled: boolean; onClick: () => void };
+}) {
+  return (
+    <div class="game-roster" data-roster-panel>
+      <h3 class="game-roster-heading">Party</h3>
+      <ul class="game-roster-list" data-roster>
+        {players.map((p) => (
+          <li class="game-roster-tab" key={p.sessionId} data-ready={p.ready}>
+            <span class="game-roster-avatar" aria-hidden="true">
+              {p.username.charAt(0).toUpperCase()}
+            </span>
+            <span class="game-roster-name">{p.username}</span>
+            <span class="game-roster-status">{p.ready ? "Ready" : "Waiting"}</span>
+          </li>
+        ))}
+      </ul>
+      {ready ? (
+        <button type="button" data-action="ready" disabled={ready.disabled} onClick={ready.onClick}>
+          {ready.disabled ? "Ready!" : "Ready"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function GameHud({ room }: { room: Room }) {
   const { players, timeline } = useRoomHudState(room);
   const me = players.find((p) => p.sessionId === room.sessionId);
@@ -101,19 +131,10 @@ export function GameHud({ room }: { room: Room }) {
   }
 
   return (
-    <div class="game-hud game-hud-active" data-active>
-      <button type="button" data-action="ready" disabled={me?.ready ?? false} onClick={() => room.send("ready")}>
-        {me?.ready ? "Ready!" : "Ready"}
-      </button>
-      <ul class="game-hud-roster" data-roster>
-        {players.map((p) => (
-          <li key={p.sessionId} data-ready={p.ready}>
-            {p.username}
-            {p.ready ? " ✓" : ""}
-          </li>
-        ))}
-      </ul>
-    </div>
+    <PlayerRoster
+      players={players}
+      ready={{ disabled: me?.ready ?? false, onClick: () => room.send("ready") }}
+    />
   );
 }
 

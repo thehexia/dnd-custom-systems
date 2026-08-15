@@ -20,8 +20,8 @@ Promise.all([showRoomGate(), themeFontsReady]).then(([room]) => {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: "app",
-    width: 800,
-    height: 600,
+    width: 1100,
+    height: 750,
     backgroundColor: "#2b1f14",
     scene: [],
   });

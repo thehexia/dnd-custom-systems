@@ -72,8 +72,12 @@ describe("active phase", () => {
     render(<GameHud room={room} />);
 
     expect((screen.getByRole("button", { name: "Ready!" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("alice ✓")).toBeTruthy();
+    expect(screen.getByText("alice")).toBeTruthy();
     expect(screen.getByText("bob")).toBeTruthy();
+    const aliceTab = screen.getByText("alice").closest("[data-ready]");
+    const bobTab = screen.getByText("bob").closest("[data-ready]");
+    expect(aliceTab?.getAttribute("data-ready")).toBe("true");
+    expect(bobTab?.getAttribute("data-ready")).toBe("false");
   });
 });
 

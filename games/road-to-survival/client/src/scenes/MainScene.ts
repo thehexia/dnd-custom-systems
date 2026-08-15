@@ -3,19 +3,31 @@ import { getStateCallbacks } from "colyseus.js";
 import Phaser from "phaser";
 import { computeVerticalTileLayout, describeSegment, iconKeyForTimeOfDay, nextSelectedSegment, tileVisualState } from "./timeline";
 
-const CONTENT_LEFT = 40;
-const CONTENT_TOP = 40;
+const CONTENT_LEFT = 56;
+const CONTENT_TOP = 64;
 
-const NAV_TILE_WIDTH = 150;
-const NAV_RIGHT_MARGIN = 30;
-const NAV_TOP = 130;
-const NAV_BOTTOM_MARGIN = 30;
-const TILE_GAP = 6;
-const TILE_RADIUS = 10;
-const MIN_TILE_HEIGHT = 20;
+const NAV_TILE_WIDTH = 190;
+const NAV_RIGHT_MARGIN = 40;
+const NAV_TOP = 140;
+const NAV_BOTTOM_MARGIN = 40;
+const TILE_GAP = 22;
+const TILE_RADIUS = 12;
+const MIN_TILE_HEIGHT = 28;
 
-const WEEK_TEXT_TOP = 30;
-const JUMP_BUTTON_TOP = 74;
+const WEEK_TEXT_TOP = 36;
+const JUMP_BUTTON_TOP = 86;
+
+// The selected/viewed segment's content area is presented as its own card, matching the
+// wood-panel treatment used for the DOM surfaces (room gate, HUD) instead of floating text
+// directly on the board background.
+const CARD_LEFT = 28;
+const CARD_TOP = 28;
+const CARD_RIGHT_GAP = 28;
+const CARD_BOTTOM_MARGIN = 40;
+const CARD_RADIUS = 14;
+const CARD_BORDER_WIDTH = 4;
+const CARD_FILL = 0x3a2a1a;
+const CARD_WOOD_ALPHA = 0.2;
 
 const DAY_FILL = 0xe8c784;
 const NIGHT_FILL = 0x2e3a59;
@@ -66,6 +78,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   create() {
+    this.drawContentCard();
+
     this.track = this.add.graphics();
     this.weekText = this.add.text(0, WEEK_TEXT_TOP, "", {
       fontSize: "24px",
@@ -101,6 +115,29 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
+  private navX(): number {
+    return this.scale.width - NAV_RIGHT_MARGIN - NAV_TILE_WIDTH;
+  }
+
+  // The card's geometry only depends on the canvas size (fixed) and layout constants, not on
+  // room state, so it's drawn once up front rather than waiting for the timeline to be ready.
+  private drawContentCard(): void {
+    const width = this.navX() - CARD_RIGHT_GAP - CARD_LEFT;
+    const height = this.scale.height - CARD_TOP - CARD_BOTTOM_MARGIN;
+
+    const card = this.add.graphics();
+    card.fillStyle(CARD_FILL, 1);
+    card.fillRoundedRect(CARD_LEFT, CARD_TOP, width, height, CARD_RADIUS);
+    card.lineStyle(CARD_BORDER_WIDTH, BORDER, 1);
+    card.strokeRoundedRect(CARD_LEFT, CARD_TOP, width, height, CARD_RADIUS);
+
+    this.add
+      .tileSprite(CARD_LEFT, CARD_TOP, width, height, WOOD_TEXTURE_KEY)
+      .setOrigin(0, 0)
+      .setAlpha(CARD_WOOD_ALPHA)
+      .setBlendMode(Phaser.BlendModes.MULTIPLY);
+  }
+
   private whenTimelineReady(callback: () => void): void {
     if (this.room.state.timeline) {
       callback();
@@ -115,7 +152,7 @@ export class MainScene extends Phaser.Scene {
   private setUpNavBar(): void {
     const { daysPerWeek } = this.room.state.timeline;
     const total = daysPerWeek * 2;
-    const navX = this.scale.width - NAV_RIGHT_MARGIN - NAV_TILE_WIDTH;
+    const navX = this.navX();
     const availableHeight = this.scale.height - NAV_TOP - NAV_BOTTOM_MARGIN;
     const { tileHeight, positions } = computeVerticalTileLayout(total, availableHeight, TILE_GAP, MIN_TILE_HEIGHT);
 
@@ -205,6 +242,21 @@ export class MainScene extends Phaser.Scene {
     this.track.clear();
     for (let i = 1; i <= total; i++) {
       const y = NAV_TOP + positions[i - 1];
+
+      // A connector line fills the gap above this tile, so the nav bar reads as a timeline
+      // (a path through the segments) rather than a stack of disconnected tiles. The path
+      // already walked (up to the current segment) is drawn in the accent color.
+      if (i > 1) {
+        const prevBottom = NAV_TOP + positions[i - 2] + tileHeight;
+        const connectorWalked = i - 1 < segment;
+        const lineX = navX + NAV_TILE_WIDTH / 2;
+        this.track.lineStyle(3, connectorWalked ? CURRENT_BORDER : BORDER, connectorWalked ? 0.9 : 0.5);
+        this.track.beginPath();
+        this.track.moveTo(lineX, prevBottom);
+        this.track.lineTo(lineX, y);
+        this.track.strokePath();
+      }
+
       const visual = tileVisualState(i, segment, this.selectedSegment);
       const fill = visual.timeOfDay === "day" ? DAY_FILL : NIGHT_FILL;
       const alpha = visual.isCompleted ? 0.5 : visual.isCurrent ? 1 : 0.35;
