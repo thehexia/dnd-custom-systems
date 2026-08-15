@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: road-to-survival-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: road_to_survival
+      POSTGRES_PASSWORD: road_to_survival
+      POSTGRES_DB: road_to_survival
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U road_to_survival"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

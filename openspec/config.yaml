@@ -1,0 +1,39 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+context: |
+  Monorepo of custom D&D-adjacent games, one subfolder per game under games/<game-name>.
+  Domains in openspec/specs/ should be prefixed with the game name (e.g. road-to-survival-<feature>)
+  so specs from different games don't collide as more games are added. Client and server for the
+  same game are NOT separate domains -- a game's client and server ship together as one product,
+  so keep them under a single road-to-survival-* domain rather than splitting by client/server.
+
+  games/road-to-survival — multiplayer game (client + server share one domain, see above)
+    - client/: Phaser 3 + Vite + TypeScript (games/road-to-survival/client)
+    - server/: Colyseus + Express + TypeScript, Prisma -> Postgres (games/road-to-survival/server)
+    - npm workspaces defined in games/road-to-survival/package.json ("client", "server")
+    - local Postgres via games/road-to-survival/docker-compose.yml
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

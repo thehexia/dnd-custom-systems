@@ -1,0 +1,23 @@
+{
+  "name": "road-to-survival",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "overrides": {
+    "@colyseus/core": "0.16.24"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=server & npm run dev --workspace=client & wait",
+    "dev:server": "npm run dev --workspace=server",
+    "dev:client": "npm run dev --workspace=client",
+    "build": "npm run build --workspace=server && npm run build --workspace=client",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f postgres",
+    "prisma:generate": "npm run prisma:generate --workspace=server",
+    "prisma:migrate": "npm run prisma:migrate --workspace=server",
+    "prisma:studio": "npm run prisma:studio --workspace=server"
+  }
+}
