@@ -132,6 +132,40 @@ test("clicking a different nav bar tile updates the selected segment", async ({ 
   }
 });
 
+test("a non-admin player clicking a nav bar tile does not change the selected segment", async ({ browser }) => {
+  const { contextA, contextB, pageB } = await createRoomAndJoinSecond(browser, "lookahead-a", "lookahead-b");
+
+  try {
+    await expect(pageB.locator("#app")).toHaveAttribute("data-selected-segment", "1");
+    await expect(pageB.locator("#app")).toHaveAttribute("data-segment-label", "Day 1, Day-time");
+
+    await pageB.locator("canvas").click({ position: TILE_2_CENTER });
+
+    // The click has no effect: the non-admin's selection stays on the room's actual current segment.
+    await expect(pageB.locator("#app")).toHaveAttribute("data-selected-segment", "1");
+    await expect(pageB.locator("#app")).toHaveAttribute("data-segment-label", "Day 1, Day-time");
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
+test("the jump-to-current-day control is not an interactive affordance for a non-admin player", async ({ browser }) => {
+  const { contextA, contextB, pageA, pageB } = await createRoomAndJoinSecond(browser, "jump-admin", "jump-non-admin");
+
+  try {
+    await pageA.locator("canvas").hover({ position: JUMP_TO_CURRENT_DAY });
+    await expect.poll(() => pageA.locator("canvas").evaluate((el) => el.style.cursor)).toBe("pointer");
+
+    await pageB.locator("canvas").hover({ position: JUMP_TO_CURRENT_DAY });
+    const nonAdminCursor = await pageB.locator("canvas").evaluate((el) => el.style.cursor);
+    expect(nonAdminCursor).not.toBe("pointer");
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
 test("two players ready up and the shared timeline advances to segment 2 for both clients", async ({ browser }) => {
   const { contextA, contextB, pageA, pageB, code } = await createRoomAndJoinSecond(browser, "ready-a", "ready-b");
 
@@ -142,6 +176,38 @@ test("two players ready up and the shared timeline advances to segment 2 for bot
     const { room: observerRoom } = await observeRoom(code);
     try {
       await expect.poll(() => observerRoom.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+    } finally {
+      await observerRoom.leave();
+    }
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
+test("the admin can override the segment forward and backward without every player readying up, and a non-admin never sees the controls", async ({
+  browser,
+}) => {
+  const { contextA, contextB, pageA, pageB, code } = await createRoomAndJoinSecond(browser, "override-a", "override-b");
+
+  try {
+    await expect(pageB.locator('[data-action="override-next"]')).toHaveCount(0);
+    await expect(pageB.locator('[data-action="override-previous"]')).toHaveCount(0);
+
+    // Only the admin readies up -- the override must still work without pageB's vote.
+    await pageA.locator('[data-action="ready"]').click();
+
+    const { room: observerRoom } = await observeRoom(code);
+    try {
+      expect(observerRoom.state.timeline.segment).toBe(1);
+
+      await pageA.locator('[data-action="override-next"]').click();
+      await expect.poll(() => observerRoom.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+      // The override resets readiness, so the admin's "ready" control is enabled again.
+      await expect(pageA.locator('[data-action="ready"]')).toBeEnabled();
+
+      await pageA.locator('[data-action="override-previous"]').click();
+      await expect.poll(() => observerRoom.state.timeline.segment, { timeout: 5_000 }).toBe(1);
     } finally {
       await observerRoom.leave();
     }

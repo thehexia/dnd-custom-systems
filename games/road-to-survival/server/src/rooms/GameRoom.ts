@@ -19,6 +19,10 @@ interface ResolveWeekEndMessage {
   outcome: "continue" | "death";
 }
 
+interface OverrideSegmentMessage {
+  direction: "next" | "previous";
+}
+
 interface CreateOptions {
   action: "create";
   username: string;
@@ -98,14 +102,29 @@ export class GameRoom extends Room<GameState> {
       }
     });
 
+    this.onMessage<OverrideSegmentMessage>("override-segment", (client, message) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player?.isAdmin) return;
+      if (this.state.timeline.phase !== "active") return;
+
+      if (message.direction === "next") {
+        this.advanceSegment();
+      } else if (message.direction === "previous") {
+        const { timeline } = this.state;
+        if (timeline.segment > 1) {
+          timeline.segment -= 1;
+        }
+        for (const p of this.state.players.values()) p.ready = false;
+      }
+    });
+
     this.clock.setInterval(() => this.flushState(), FLUSH_INTERVAL_MS);
   }
 
   /**
-   * Advances the shared timeline once every currently connected player is ready: increments the
-   * segment, or -- on the week's last segment -- enters the week-end decision state instead of
-   * advancing further (see specs/road-to-survival-timeline-board's Segment Advances / Week-End
-   * Decision Point requirements).
+   * Advances the shared timeline once every currently connected player is ready (see
+   * specs/road-to-survival-timeline-board's Segment Advances requirement), or immediately for an
+   * admin's forward override (see the Admin Override requirement).
    */
   private maybeAdvance(): void {
     const { timeline } = this.state;
@@ -114,13 +133,24 @@ export class GameRoom extends Room<GameState> {
     const players = [...this.state.players.values()];
     if (players.length === 0 || !players.every((p) => p.ready)) return;
 
+    this.advanceSegment();
+  }
+
+  /**
+   * Increments the segment, or -- on the week's last segment -- enters the week-end decision
+   * state instead of advancing further, then resets every connected player's readiness (see
+   * specs/road-to-survival-timeline-board's Segment Advances / Week-End Decision Point
+   * requirements).
+   */
+  private advanceSegment(): void {
+    const { timeline } = this.state;
     const total = totalSegments(timeline.daysPerWeek);
     if (timeline.segment < total) {
       timeline.segment += 1;
     } else {
       timeline.phase = "week-end";
     }
-    for (const p of players) p.ready = false;
+    for (const p of this.state.players.values()) p.ready = false;
   }
 
   async onAuth(_client: Client, options: GameRoomOptions, _context: AuthContext) {

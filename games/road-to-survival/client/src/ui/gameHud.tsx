@@ -70,9 +70,11 @@ function useRoomHudState(room: Room): { players: PlayerSnapshot[]; timeline: Tim
 function PlayerRoster({
   players,
   ready,
+  adminOverride,
 }: {
   players: PlayerSnapshot[];
   ready?: { disabled: boolean; onClick: () => void };
+  adminOverride?: { onPrevious: () => void; onNext: () => void };
 }) {
   return (
     <div class="game-roster" data-roster-panel>
@@ -92,6 +94,16 @@ function PlayerRoster({
         <button type="button" data-action="ready" disabled={ready.disabled} onClick={ready.onClick}>
           {ready.disabled ? "Ready!" : "Ready"}
         </button>
+      ) : null}
+      {adminOverride ? (
+        <div class="game-roster-override" data-admin-override>
+          <button type="button" data-action="override-previous" onClick={adminOverride.onPrevious}>
+            ◀ Previous
+          </button>
+          <button type="button" data-action="override-next" onClick={adminOverride.onNext}>
+            Next ▶
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -134,6 +146,14 @@ export function GameHud({ room }: { room: Room }) {
     <PlayerRoster
       players={players}
       ready={{ disabled: me?.ready ?? false, onClick: () => room.send("ready") }}
+      adminOverride={
+        me?.isAdmin
+          ? {
+              onPrevious: () => room.send("override-segment", { direction: "previous" }),
+              onNext: () => room.send("override-segment", { direction: "next" }),
+            }
+          : undefined
+      }
     />
   );
 }

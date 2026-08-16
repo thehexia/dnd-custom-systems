@@ -105,6 +105,40 @@ Once a room enters the game-over state, the system SHALL NOT accept further read
 - **WHEN** a room is in the game-over state
 - **THEN** the system rejects ready signals and any week-end decision attempts for that room
 
+### Requirement: Admin Override of Segment Advancement
+While a room's timeline is in the "active" phase, the system SHALL allow only the room's admin to step the room's actual current segment forward or backward by exactly one, bypassing the requirement that every connected player be ready. Advancing forward from the week's last segment SHALL enter the week-end decision state, the same transition that full-ready advancement triggers. Stepping backward from segment 1 of the current week SHALL have no effect; the timeline SHALL NOT cross into the previous week. Either direction SHALL reset every connected player's readiness to not-ready for the segment the timeline lands on. The system SHALL reject the override when the room's timeline is not in the "active" phase, and SHALL reject it from a non-admin player.
+
+#### Scenario: Admin advances the segment without full readiness
+- **WHEN** the room's admin triggers a forward override while at least one connected player is not ready, and the current segment is not the week's last segment
+- **THEN** the system advances the timeline to the next segment
+- **AND** resets every connected player's readiness to not-ready
+
+#### Scenario: Admin forward override at the week's last segment enters week-end decision
+- **WHEN** the room's admin triggers a forward override while the timeline is at the week's last segment
+- **THEN** the system enters the week-end decision state for that room, the same as if every connected player had readied up
+
+#### Scenario: Admin rewinds the segment
+- **WHEN** the room's admin triggers a backward override while the timeline is at a segment other than segment 1
+- **THEN** the system moves the timeline back to the previous segment
+- **AND** resets every connected player's readiness to not-ready
+
+#### Scenario: Admin backward override at segment 1 has no effect
+- **WHEN** the room's admin triggers a backward override while the timeline is at segment 1 of the current week
+- **THEN** the timeline remains at segment 1 of the current week
+- **AND** the week number is unchanged
+
+#### Scenario: Non-admin cannot use the override
+- **WHEN** a non-admin player attempts to trigger a forward or backward override
+- **THEN** the system rejects the attempt and the timeline is unaffected
+
+#### Scenario: Override rejected during the week-end decision state
+- **WHEN** the room's admin attempts a forward or backward override while the room is in the week-end decision state
+- **THEN** the system rejects the attempt and the room remains in the week-end decision state, unresolved
+
+#### Scenario: Override rejected in the game-over state
+- **WHEN** the room's admin attempts a forward or backward override while the room is in the game-over state
+- **THEN** the system rejects the attempt and the room remains in the game-over state
+
 ### Requirement: Timeline Board Presentation
 The client SHALL render the shared timeline as a vertical nav bar docked to one side of the game board, in the game's tabletop-inspired visual style, visually distinguishing completed segments, the room's actual current segment, and upcoming segments within the week, and displaying the current week number at all times. Segment tiles SHALL be stacked top-to-bottom in segment order and SHALL alternate between a day styling and a night styling in sequence, matching each segment's actual day/night time-of-day. The area of the game board not occupied by the nav bar SHALL be reserved for segment content (see Segment Content Area).
 
@@ -125,16 +159,21 @@ The client SHALL render the shared timeline as a vertical nav bar docked to one 
 - **THEN** segment tiles are arranged in a single vertical column, ordered from segment 1 at one end to the week's last segment at the other
 
 ### Requirement: Segment Selection via Nav Bar
-The client SHALL allow a player to select any segment of the current week by interacting with its tile in the nav bar. The selected segment SHALL determine what is displayed in the segment content area (see Segment Content Area) and is independent of the room's actual current segment: a player MAY select and view a segment other than the room's current segment without affecting the shared room timeline.
+The client SHALL allow only the room's admin to select any segment of the current week by interacting with its tile in the nav bar. The selected segment SHALL determine what is displayed in the segment content area (see Segment Content Area) and is independent of the room's actual current segment: the admin MAY select and view a segment other than the room's current segment without affecting the shared room timeline. For a non-admin player, the client SHALL NOT allow segment selection via the nav bar; a non-admin player's selected segment SHALL always be the room's actual current segment, so their content area only ever shows the current segment's content card.
 
 #### Scenario: Player selects a different segment to view
-- **WHEN** a player interacts with a nav bar tile for a segment other than the currently selected one
+- **WHEN** the room's admin interacts with a nav bar tile for a segment other than the currently selected one
 - **THEN** that segment becomes the selected segment
 - **AND** the segment content area updates to display that segment's content
 
 #### Scenario: Selecting a segment does not change room state
-- **WHEN** a player selects a segment via the nav bar
+- **WHEN** the admin selects a segment via the nav bar
 - **THEN** the room's actual current segment, week, and phase are unaffected
+
+#### Scenario: Non-admin cannot select a different segment
+- **WHEN** a non-admin player interacts with a nav bar tile for a segment other than the room's actual current segment
+- **THEN** the selected segment remains the room's actual current segment
+- **AND** the segment content area continues to display only the current segment's content
 
 ### Requirement: Selected Segment Defaults to Current Segment
 When a player first views the timeline, and whenever the room's actual current segment advances, the client SHALL set the selected segment to the room's actual current segment, unless the player has manually selected a different segment that the advancement has not superseded.
@@ -159,12 +198,16 @@ When the selected segment differs from the room's actual current segment, the na
 - **THEN** the nav bar shows a single distinguishing mark for that tile rather than two separate marks
 
 ### Requirement: Jump to Current Day Control
-The nav bar SHALL provide a control that, when activated, sets the selected segment to the room's actual current segment.
+The nav bar SHALL provide a control, available only to the room's admin, that when activated sets the selected segment to the room's actual current segment. The client SHALL NOT present this control as an interactive affordance to non-admin players, since a non-admin player's selected segment always already matches the room's actual current segment.
 
 #### Scenario: Player jumps back to the current day
-- **WHEN** a player has selected a segment other than the room's actual current segment and activates the jump-to-current-day control
+- **WHEN** the admin has selected a segment other than the room's actual current segment and activates the jump-to-current-day control
 - **THEN** the selected segment becomes the room's actual current segment
 - **AND** the segment content area updates accordingly
+
+#### Scenario: Control is not available to non-admin players
+- **WHEN** a non-admin player views the nav bar
+- **THEN** the jump-to-current-day control is not presented as an interactive affordance to them
 
 ### Requirement: Segment Content Area
 The client SHALL render a content area occupying the portion of the game board not covered by the nav bar. The content area SHALL display, at minimum, the day number and time-of-day (day-time or night-time) of the selected segment.

@@ -110,6 +110,7 @@ export class MainScene extends Phaser.Scene {
   private jumpButtonColor = JUMP_BUTTON_NIGHT;
   private skyTween: Phaser.Tweens.Tween | null = null;
   private isDayTheme: boolean | null = null;
+  private isAdmin = false;
 
   constructor() {
     super("main");
@@ -135,18 +136,11 @@ export class MainScene extends Phaser.Scene {
       fontFamily: FONT_DISPLAY,
       color: "#fdf4dd",
     });
-    this.jumpButton = this.add
-      .text(0, JUMP_BUTTON_TOP, "▲ Jump to current day", {
-        fontSize: "14px",
-        fontFamily: FONT_BODY,
-        color: "#9fd3f2",
-      })
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => {
-        if (this.room.state.timeline) {
-          this.selectSegment(this.room.state.timeline.segment);
-        }
-      });
+    this.jumpButton = this.add.text(0, JUMP_BUTTON_TOP, "▲ Jump to current day", {
+      fontSize: "14px",
+      fontFamily: FONT_BODY,
+      color: "#9fd3f2",
+    });
     this.dayText = this.add.text(CONTENT_LEFT, CONTENT_TOP, "", {
       fontSize: "28px",
       fontFamily: FONT_DISPLAY,
@@ -157,7 +151,15 @@ export class MainScene extends Phaser.Scene {
     // join/create resolves, before the first full state sync is decoded -- wait for it instead
     // of reading/subscribing immediately, which would throw.
     this.whenTimelineReady(() => {
+      this.isAdmin = this.room.state.players.get(this.room.sessionId)?.isAdmin ?? false;
       this.setUpNavBar();
+      if (this.isAdmin) {
+        this.jumpButton.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
+          if (this.room.state.timeline) {
+            this.selectSegment(this.room.state.timeline.segment);
+          }
+        });
+      }
       const $ = getStateCallbacks(this.room);
       $(this.room.state).timeline.onChange(() => this.renderTimeline());
       this.renderTimeline();
@@ -285,11 +287,10 @@ export class MainScene extends Phaser.Scene {
 
     for (let i = 1; i <= total; i++) {
       const y = NAV_TOP + positions[i - 1];
-      const zone = this.add
-        .zone(navX, y, NAV_TILE_WIDTH, tileHeight)
-        .setOrigin(0, 0)
-        .setInteractive({ useHandCursor: true })
-        .on("pointerdown", () => this.selectSegment(i));
+      const zone = this.add.zone(navX, y, NAV_TILE_WIDTH, tileHeight).setOrigin(0, 0);
+      if (this.isAdmin) {
+        zone.setInteractive({ useHandCursor: true }).on("pointerdown", () => this.selectSegment(i));
+      }
       this.tileZones.push(zone);
 
       const timeOfDay = describeSegment(i).timeOfDay;

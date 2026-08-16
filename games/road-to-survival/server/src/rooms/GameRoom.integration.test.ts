@@ -235,3 +235,99 @@ describe("GameRoom resolve-week-end (real Postgres)", () => {
     expect(admin.state.players.get(admin.sessionId)?.ready).toBe(false);
   });
 });
+
+describe("GameRoom override-segment (real Postgres)", () => {
+  it("admin forward override advances the segment without every player being ready, and resets readiness", async () => {
+    const { rooms } = await createRoomAndJoin("override-next-1", ["override-next-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("ready");
+    await expect.poll(() => admin.state.players.get(admin.sessionId)?.ready, { timeout: 5_000 }).toBe(true);
+
+    admin.send("override-segment", { direction: "next" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+    expect(admin.state.players.get(admin.sessionId)?.ready).toBe(false);
+    expect(admin.state.players.get(other.sessionId)?.ready).toBe(false);
+  });
+
+  it("admin forward override at the week's last segment enters week-end", async () => {
+    // daysPerWeek: 1 -> 2 segments total, so the first override reaches the last segment (2)
+    // and the second, from the last segment, enters week-end.
+    const { rooms } = await createRoomAndJoin("override-next-end-1", ["override-next-end-2"], 1);
+    const [admin] = rooms;
+
+    admin.send("override-segment", { direction: "next" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+
+    admin.send("override-segment", { direction: "next" });
+    await expect.poll(() => admin.state.timeline.phase, { timeout: 5_000 }).toBe("week-end");
+    expect(admin.state.timeline.segment).toBe(2);
+  });
+
+  it("admin backward override moves back a segment and resets readiness", async () => {
+    const { rooms } = await createRoomAndJoin("override-prev-1", ["override-prev-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("ready");
+    other.send("ready");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+
+    admin.send("ready");
+    await expect.poll(() => admin.state.players.get(admin.sessionId)?.ready, { timeout: 5_000 }).toBe(true);
+
+    admin.send("override-segment", { direction: "previous" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(1);
+    expect(admin.state.players.get(admin.sessionId)?.ready).toBe(false);
+    expect(admin.state.players.get(other.sessionId)?.ready).toBe(false);
+  });
+
+  it("admin backward override at segment 1 is a no-op", async () => {
+    const { rooms } = await createRoomAndJoin("override-prev-clamp-1", ["override-prev-clamp-2"]);
+    const [admin] = rooms;
+
+    admin.send("override-segment", { direction: "previous" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.segment).toBe(1);
+    expect(admin.state.timeline.week).toBe(1);
+  });
+
+  it("rejects a non-admin's override attempt, leaving the timeline unaffected", async () => {
+    const { rooms } = await createRoomAndJoin("override-nonadmin-1", ["override-nonadmin-2"]);
+    const [admin, other] = rooms;
+
+    other.send("override-segment", { direction: "next" });
+    // No message confirms rejection, so assert the negative by giving the (non-)effect time to
+    // arrive and then checking state is unchanged -- the admin's own valid override below proves
+    // the room is still responsive, not just slow.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.segment).toBe(1);
+
+    admin.send("override-segment", { direction: "next" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+  });
+
+  it("rejects the override during the week-end decision state", async () => {
+    const { rooms } = await createRoomAndJoin("override-weekend-1", ["override-weekend-2"], 1);
+    const [admin] = rooms;
+
+    await driveToWeekEnd(rooms, 1);
+
+    admin.send("override-segment", { direction: "previous" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.phase).toBe("week-end");
+    expect(admin.state.timeline.segment).toBe(2);
+  });
+
+  it("rejects the override in the game-over state", async () => {
+    const { rooms } = await createRoomAndJoin("override-gameover-1", ["override-gameover-2"], 1);
+    const [admin] = rooms;
+
+    await driveToWeekEnd(rooms, 1);
+    admin.send("resolve-week-end", { outcome: "death" });
+    await expect.poll(() => admin.state.timeline.phase, { timeout: 5_000 }).toBe("game-over");
+
+    admin.send("override-segment", { direction: "next" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.phase).toBe("game-over");
+  });
+});
