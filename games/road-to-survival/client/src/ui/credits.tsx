@@ -13,6 +13,24 @@ interface AttributedAsset {
 const ATTRIBUTED_ASSETS: AttributedAsset[] = [
   { name: "Sun icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/sun.html" },
   { name: "Moon icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/moon.html" },
+  { name: "Acrobatics icon", author: "DarkZaitzev", license: "CC BY 3.0", url: "https://game-icons.net/1x1/darkzaitzev/acrobatic.html" },
+  { name: "Animal Handling icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/wolf-head.html" },
+  { name: "Arcana icon", author: "Delapouite", license: "CC BY 3.0", url: "https://game-icons.net/1x1/delapouite/spell-book.html" },
+  { name: "Athletics icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/muscle-up.html" },
+  { name: "Deception icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/drama-masks.html" },
+  { name: "History icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/scroll-unfurled.html" },
+  { name: "Insight icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/third-eye.html" },
+  { name: "Intimidation icon", author: "Delapouite", license: "CC BY 3.0", url: "https://game-icons.net/1x1/delapouite/angry-eyes.html" },
+  { name: "Investigation icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/magnifying-glass.html" },
+  { name: "Medicine icon", author: "Delapouite", license: "CC BY 3.0", url: "https://game-icons.net/1x1/delapouite/health-potion.html" },
+  { name: "Nature icon", author: "Delapouite", license: "CC BY 3.0", url: "https://game-icons.net/1x1/delapouite/oak-leaf.html" },
+  { name: "Perception icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/eyeball.html" },
+  { name: "Performance icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/lyre.html" },
+  { name: "Persuasion icon", author: "Delapouite", license: "CC BY 3.0", url: "https://game-icons.net/1x1/delapouite/convince.html" },
+  { name: "Religion icon", author: "Lorc", license: "CC BY 3.0", url: "https://game-icons.net/1x1/lorc/prayer.html" },
+  { name: "Sleight of Hand icon", author: "Delapouite", license: "CC BY 3.0", url: "https://game-icons.net/1x1/delapouite/lockpicks.html" },
+  { name: "Stealth icon", author: "DarkZaitzev", license: "CC BY 3.0", url: "https://game-icons.net/1x1/darkzaitzev/hooded-figure.html" },
+  { name: "Survival icon", author: "Delapouite", license: "CC BY 3.0", url: "https://game-icons.net/1x1/delapouite/camping-tent.html" },
 ];
 
 export function Credits() {

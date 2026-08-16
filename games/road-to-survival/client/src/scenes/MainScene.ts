@@ -1,10 +1,22 @@
 import type { Room } from "colyseus.js";
 import { getStateCallbacks } from "colyseus.js";
 import Phaser from "phaser";
+import { canVoteOnSegment, formatVoters, skillIconKey, skillIconPath, skillLabel, SKILL_SLUGS } from "./skillCheckCard";
 import { computeVerticalTileLayout, describeSegment, iconKeyForTimeOfDay, nextSelectedSegment, tileVisualState } from "./timeline";
 
 const CONTENT_LEFT = 56;
 const CONTENT_TOP = 64;
+
+// The skill-check content card sits below the day/time-of-day text, filling the rest of the
+// content card area with the segment's 4 options (see specs/road-to-survival-skill-check-cards).
+const OPTIONS_TOP = CONTENT_TOP + 64;
+const OPTION_ROW_HEIGHT = 76;
+const OPTION_ROW_GAP = 14;
+const OPTION_ICON_SIZE = 40;
+const OPTION_ICON_LEFT = CONTENT_LEFT;
+const OPTION_TEXT_LEFT = OPTION_ICON_LEFT + OPTION_ICON_SIZE + 18;
+const OPTION_VOTED_FILL = 0x2b4a2f;
+const OPTION_VOTED_ALPHA = 0.5;
 
 const NAV_TILE_WIDTH = 190;
 const NAV_RIGHT_MARGIN = 40;
@@ -69,6 +81,28 @@ interface NavLayout {
   total: number;
 }
 
+interface OptionRow {
+  background: Phaser.GameObjects.Graphics;
+  zone: Phaser.GameObjects.Zone;
+  icon: Phaser.GameObjects.Image;
+  skillText: Phaser.GameObjects.Text;
+  dcText: Phaser.GameObjects.Text;
+  votersText: Phaser.GameObjects.Text;
+}
+
+// Minimal shape of the colyseus-decoded schema state this scene reads for a segment's card --
+// room.state itself has no shared compile-time type with the server (colyseus.js decodes the
+// schema generically over the wire), so this just documents/narrows what's accessed here.
+interface SegmentCardOptionStateLike {
+  skill: string;
+  dc: number;
+  voters: string[];
+}
+
+interface SegmentCardStateLike {
+  options: SegmentCardOptionStateLike[];
+}
+
 interface Star {
   obj: Phaser.GameObjects.Arc;
   baseAlpha: number;
@@ -111,6 +145,8 @@ export class MainScene extends Phaser.Scene {
   private skyTween: Phaser.Tweens.Tween | null = null;
   private isDayTheme: boolean | null = null;
   private isAdmin = false;
+  private optionRows: OptionRow[] = [];
+  private cardSubscriptions = new Set<string>();
 
   constructor() {
     super("main");
@@ -123,6 +159,9 @@ export class MainScene extends Phaser.Scene {
   preload() {
     this.load.svg("sun", "/theme/icons/sun.svg", { width: 64, height: 64 });
     this.load.svg("moon", "/theme/icons/moon.svg", { width: 64, height: 64 });
+    for (const skill of SKILL_SLUGS) {
+      this.load.svg(skillIconKey(skill), skillIconPath(skill), { width: 64, height: 64 });
+    }
   }
 
   create() {
@@ -146,6 +185,7 @@ export class MainScene extends Phaser.Scene {
       fontFamily: FONT_DISPLAY,
       color: "#fdf4dd",
     });
+    this.createOptionRows();
 
     // room.state's nested fields (timeline, players) can briefly be undefined right after
     // join/create resolves, before the first full state sync is decoded -- wait for it instead
@@ -162,8 +202,26 @@ export class MainScene extends Phaser.Scene {
       }
       const $ = getStateCallbacks(this.room);
       $(this.room.state).timeline.onChange(() => this.renderTimeline());
+      $(this.room.state).timeline.cards.onAdd((card: SegmentCardStateLike, segmentKey: string) =>
+        this.subscribeToCard(segmentKey, card),
+      );
       this.renderTimeline();
     });
+  }
+
+  // Each option's `voters` array is nested two levels below `timeline` (timeline -> cards map ->
+  // card -> option -> voters), deeper than colyseus schema's `onChange` on `timeline` alone
+  // reaches -- so a vote arriving on an already-synced card needs its own subscription, one per
+  // option, registered once per segment the first time that segment's card is seen.
+  private subscribeToCard(segmentKey: string, card: SegmentCardStateLike): void {
+    if (this.cardSubscriptions.has(segmentKey)) return;
+    this.cardSubscriptions.add(segmentKey);
+
+    const $ = getStateCallbacks(this.room);
+    for (const option of card.options) {
+      $(option).voters.onAdd(() => this.renderTimeline());
+      $(option).voters.onRemove(() => this.renderTimeline());
+    }
   }
 
   private navX(): number {
@@ -261,6 +319,96 @@ export class MainScene extends Phaser.Scene {
     card.fillRect(CARD_LEFT, CARD_TOP + CARD_BEVEL, CARD_ACCENT_WIDTH, height - CARD_BEVEL);
   }
 
+  // The 4 option rows' geometry is fixed (always exactly 4 options per card), so -- like the nav
+  // bar tiles and the content card panel itself -- they're created once up front; renderCard()
+  // only ever updates their content, textures, and interactive state.
+  private createOptionRows(): void {
+    const rowWidth = this.navX() - CARD_RIGHT_GAP - CONTENT_LEFT - (CONTENT_LEFT - CARD_LEFT);
+
+    for (let i = 0; i < 4; i++) {
+      const y = OPTIONS_TOP + i * (OPTION_ROW_HEIGHT + OPTION_ROW_GAP);
+
+      const background = this.add.graphics();
+      const zone = this.add.zone(CONTENT_LEFT, y, rowWidth, OPTION_ROW_HEIGHT).setOrigin(0, 0);
+      const icon = this.add.image(OPTION_ICON_LEFT + OPTION_ICON_SIZE / 2, y + OPTION_ROW_HEIGHT / 2, "sun").setDisplaySize(OPTION_ICON_SIZE, OPTION_ICON_SIZE);
+      const skillText = this.add.text(OPTION_TEXT_LEFT, y + 8, "", {
+        fontSize: "18px",
+        fontFamily: FONT_DISPLAY,
+        color: "#fdf4dd",
+      });
+      const dcText = this.add.text(OPTION_TEXT_LEFT, y + 34, "", {
+        fontSize: "13px",
+        fontFamily: FONT_BODY,
+        color: "#ecdcb3",
+      });
+      const votersText = this.add.text(OPTION_TEXT_LEFT, y + 54, "", {
+        fontSize: "12px",
+        fontFamily: FONT_BODY,
+        color: "#9fd3f2",
+      });
+
+      const optionIndex = i;
+      zone.on("pointerdown", () => this.room.send("vote-skill-check", { optionIndex }));
+
+      this.optionRows.push({ background, zone, icon, skillText, dcText, votersText });
+    }
+  }
+
+  // Renders the selected segment's skill-check card into the already-created option rows (see
+  // createOptionRows). Reads live off room.state rather than caching card data locally -- the
+  // MapSchema/ArraySchema instances are mutated in place by colyseus.js as patches arrive.
+  private renderCard(): void {
+    if (this.selectedSegment === null) return;
+    const card: SegmentCardStateLike | undefined = this.room.state.timeline.cards.get(String(this.selectedSegment));
+    const votable = canVoteOnSegment(this.selectedSegment, this.room.state.timeline.segment, this.room.state.timeline.phase);
+
+    for (let i = 0; i < this.optionRows.length; i++) {
+      const row = this.optionRows[i];
+      const option = card?.options[i];
+
+      row.background.clear();
+      if (!option) {
+        row.icon.setVisible(false);
+        row.skillText.setText("");
+        row.dcText.setText("");
+        row.votersText.setText("");
+        row.zone.disableInteractive();
+        continue;
+      }
+
+      const hasVoted = option.voters.length > 0;
+      if (hasVoted) {
+        row.background.fillStyle(OPTION_VOTED_FILL, OPTION_VOTED_ALPHA);
+        row.background.fillRoundedRect(CONTENT_LEFT, row.zone.y, row.zone.width, OPTION_ROW_HEIGHT, 8);
+      }
+
+      row.icon.setVisible(true).setTexture(skillIconKey(option.skill)).setTintFill(0xfdf4dd);
+      row.skillText.setText(skillLabel(option.skill));
+      row.dcText.setText(`DC ${option.dc}`);
+      row.votersText.setText(formatVoters(option.voters));
+
+      if (votable) {
+        row.zone.setInteractive({ useHandCursor: true });
+      } else {
+        row.zone.disableInteractive();
+      }
+    }
+
+    this.syncCardToDom(card, votable);
+  }
+
+  // Canvas-rendered card content has no DOM representation for e2e tests to read, so mirror it
+  // the same way tile icons and the selected segment already are (see syncTileIconsToDom /
+  // syncSelectionToDom).
+  private syncCardToDom(card: SegmentCardStateLike | undefined, votable: boolean): void {
+    const container = document.getElementById("app");
+    if (!container) return;
+    container.dataset.cardVotable = String(votable);
+    container.dataset.cardOptions = card
+      ? JSON.stringify(card.options.map((o) => ({ skill: o.skill, dc: o.dc, voters: [...o.voters] })))
+      : "";
+  }
+
   private whenTimelineReady(callback: () => void): void {
     if (this.room.state.timeline) {
       callback();
@@ -352,6 +500,7 @@ export class MainScene extends Phaser.Scene {
     this.dayText.setText(dayLabel);
     this.syncSelectionToDom(dayLabel);
     this.applyDayNightTheme(timeOfDay === "day");
+    this.renderCard();
 
     this.track.clear();
     for (let i = 1; i <= total; i++) {

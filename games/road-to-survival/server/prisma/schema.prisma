@@ -8,24 +8,51 @@ datasource db {
 }
 
 model Room {
-  id           String       @id @default(uuid())
-  code         String       @unique
+  id           String            @id @default(uuid())
+  code         String            @unique
   passwordHash String
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
   players      RoomPlayer[]
+  segmentCards RoomSegmentCard[]
 }
 
 model RoomPlayer {
-  id        String   @id @default(uuid())
+  id        String            @id @default(uuid())
   roomId    String
-  room      Room     @relation(fields: [roomId], references: [id])
+  room      Room              @relation(fields: [roomId], references: [id])
   username  String
-  isAdmin   Boolean  @default(false)
-  x         Float    @default(0)
-  y         Float    @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isAdmin   Boolean           @default(false)
+  x         Float             @default(0)
+  y         Float             @default(0)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  votes     RoomSegmentVote[]
 
   @@unique([roomId, username])
+}
+
+model RoomSegmentCard {
+  id        String            @id @default(uuid())
+  roomId    String
+  room      Room              @relation(fields: [roomId], references: [id])
+  week      Int
+  segment   Int
+  options   Json
+  createdAt DateTime          @default(now())
+  votes     RoomSegmentVote[]
+
+  @@unique([roomId, week, segment])
+}
+
+model RoomSegmentVote {
+  id           String          @id @default(uuid())
+  cardId       String
+  card         RoomSegmentCard @relation(fields: [cardId], references: [id])
+  roomPlayerId String
+  roomPlayer   RoomPlayer      @relation(fields: [roomPlayerId], references: [id])
+  optionIndex  Int
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([cardId, roomPlayerId])
 }

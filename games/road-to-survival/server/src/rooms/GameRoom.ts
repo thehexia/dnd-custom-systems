@@ -7,7 +7,8 @@ import {
   findRoomPlayer,
   saveRoomPlayerState,
 } from "../db/rooms.js";
-import { GameState, PlayerState } from "./schema/GameState.js";
+import { loadOrCreateWeekCards, upsertVote } from "../db/segmentCards.js";
+import { GameState, PlayerState, SegmentCardOptionState, SegmentCardState } from "./schema/GameState.js";
 import { verifyRoomPassword } from "./roomCredentials.js";
 import { normalizeDaysPerWeek, totalSegments } from "./timeline.js";
 
@@ -21,6 +22,10 @@ interface ResolveWeekEndMessage {
 
 interface OverrideSegmentMessage {
   direction: "next" | "previous";
+}
+
+interface VoteSkillCheckMessage {
+  optionIndex: number;
 }
 
 interface CreateOptions {
@@ -47,6 +52,7 @@ export class GameRoom extends Room<GameState> {
   private creatorRoomPlayerId = "";
   private creatorUsername = "";
   private roomPlayerIdBySession = new Map<string, string>();
+  private cardIdBySegment = new Map<number, string>();
 
   async onCreate(options: GameRoomOptions) {
     this.setState(new GameState());
@@ -79,6 +85,14 @@ export class GameRoom extends Room<GameState> {
       this.passwordHash = room.passwordHash;
     }
 
+    // The timeline always starts a live process at Week 1 (see the daysPerWeek comment above --
+    // it isn't persisted, so a process recreated via the "join" branch resets here too), so
+    // Week 1's cards are what this process needs regardless of which branch created it. If this
+    // room already generated Week 1's cards in an earlier process, this loads them unchanged
+    // instead of regenerating (see specs/road-to-survival-skill-check-cards - Card Generation
+    // Timing's "survives room recreation" scenario).
+    await this.ensureWeekCards(this.state.timeline.week);
+
     this.onMessage("ready", (client) => {
       if (this.state.timeline.phase !== "active") return;
       const player = this.state.players.get(client.sessionId);
@@ -87,7 +101,7 @@ export class GameRoom extends Room<GameState> {
       this.maybeAdvance();
     });
 
-    this.onMessage<ResolveWeekEndMessage>("resolve-week-end", (client, message) => {
+    this.onMessage<ResolveWeekEndMessage>("resolve-week-end", async (client, message) => {
       const player = this.state.players.get(client.sessionId);
       if (!player?.isAdmin) return;
       if (this.state.timeline.phase !== "week-end") return;
@@ -97,9 +111,33 @@ export class GameRoom extends Room<GameState> {
         this.state.timeline.segment = 1;
         this.state.timeline.phase = "active";
         for (const p of this.state.players.values()) p.ready = false;
+        await this.ensureWeekCards(this.state.timeline.week);
       } else if (message.outcome === "death") {
         this.state.timeline.phase = "game-over";
       }
+    });
+
+    this.onMessage<VoteSkillCheckMessage>("vote-skill-check", async (client, message) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      if (this.state.timeline.phase !== "active") return;
+
+      const { optionIndex } = message;
+      if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex > 3) return;
+
+      const segment = this.state.timeline.segment;
+      const cardState = this.state.timeline.cards.get(String(segment));
+      const cardId = this.cardIdBySegment.get(segment);
+      const roomPlayerId = this.roomPlayerIdBySession.get(client.sessionId);
+      if (!cardState || !cardId || !roomPlayerId) return;
+
+      await upsertVote(cardId, roomPlayerId, optionIndex);
+
+      for (const option of cardState.options) {
+        const existingIndex = option.voters.indexOf(player.username);
+        if (existingIndex !== -1) option.voters.splice(existingIndex, 1);
+      }
+      cardState.options[optionIndex].voters.push(player.username);
     });
 
     this.onMessage<OverrideSegmentMessage>("override-segment", (client, message) => {
@@ -151,6 +189,36 @@ export class GameRoom extends Room<GameState> {
       timeline.phase = "week-end";
     }
     for (const p of this.state.players.values()) p.ready = false;
+  }
+
+  /**
+   * Loads (self-healing any gap) or generates every segment's skill-check card for the given
+   * week, then replaces `state.timeline.cards` with them (see design.md's "Card generation is
+   * server-authoritative and idempotent" and "Room-process recreation loads rather than
+   * regenerates" decisions).
+   */
+  private async ensureWeekCards(week: number): Promise<void> {
+    const total = totalSegments(this.state.timeline.daysPerWeek);
+    const cards = await loadOrCreateWeekCards(this.roomDbId, week, total);
+
+    this.state.timeline.cards.clear();
+    this.cardIdBySegment.clear();
+
+    for (const card of cards) {
+      const cardState = new SegmentCardState();
+      const options = card.options as { skill: string; dc: number }[];
+      for (const option of options) {
+        const optionState = new SegmentCardOptionState();
+        optionState.skill = option.skill;
+        optionState.dc = option.dc;
+        cardState.options.push(optionState);
+      }
+      for (const vote of card.votes) {
+        cardState.options[vote.optionIndex]?.voters.push(vote.roomPlayer.username);
+      }
+      this.state.timeline.cards.set(String(card.segment), cardState);
+      this.cardIdBySegment.set(card.segment, card.id);
+    }
   }
 
   async onAuth(_client: Client, options: GameRoomOptions, _context: AuthContext) {
