@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored) and adjust as needed.
+# Do NOT put neon_database_url here -- supply it via the TF_VAR_neon_database_url
+# environment variable instead (see README.md).
+
+location                 = "eastus"
+static_web_app_location  = "eastus2"
+resource_group_name      = "rg-road-to-survival"
+name_prefix              = "rts"

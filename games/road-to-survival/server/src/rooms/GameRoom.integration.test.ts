@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../db/prisma.js";
 import { findRoomByCode, findRoomPlayer } from "../db/rooms.js";
 import { GameRoom } from "./GameRoom.js";
+import type { SegmentCardOptionState } from "./schema/GameState.js";
 
 let colyseus: ColyseusTestServer;
 
@@ -342,7 +343,7 @@ describe("GameRoom skill-check card generation (real Postgres)", () => {
     for (let segment = 1; segment <= 4; segment++) {
       const card = admin.state.timeline.cards.get(String(segment));
       expect(card?.options).toHaveLength(4);
-      const skills = card!.options.map((o) => o.skill);
+      const skills = card!.options.map((o: SegmentCardOptionState) => o.skill);
       expect(new Set(skills).size).toBe(4);
       for (const option of card!.options) {
         expect(option.dc).toBeGreaterThanOrEqual(5);
@@ -356,14 +357,14 @@ describe("GameRoom skill-check card generation (real Postgres)", () => {
     const [admin] = rooms;
 
     await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBe(2);
-    const week1Segment1Options = admin.state.timeline.cards.get("1")!.options.map((o) => o.skill);
+    const week1Segment1Options = admin.state.timeline.cards.get("1")!.options.map((o: SegmentCardOptionState) => o.skill);
 
     await driveToWeekEnd(rooms, 1);
     admin.send("resolve-week-end", { outcome: "continue" });
 
     await expect.poll(() => admin.state.timeline.week, { timeout: 5_000 }).toBe(2);
     await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBe(2);
-    const week2Segment1Options = admin.state.timeline.cards.get("1")!.options.map((o) => o.skill);
+    const week2Segment1Options = admin.state.timeline.cards.get("1")!.options.map((o: SegmentCardOptionState) => o.skill);
 
     // Not a guarantee of difference (random skills could coincidentally repeat), but the card
     // was regenerated for the new week rather than the old map entry surviving unchanged --
@@ -413,7 +414,9 @@ describe("GameRoom vote-skill-check (real Postgres)", () => {
     admin.send("vote-skill-check", { optionIndex: 0 });
 
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(admin.state.timeline.cards.get("2")?.options.some((o) => o.voters.length > 0)).toBe(false);
+    expect(
+      admin.state.timeline.cards.get("2")?.options.some((o: SegmentCardOptionState) => o.voters.length > 0),
+    ).toBe(false);
   });
 
   it("always applies the vote to the room's actual current segment, not a previously-voted one", async () => {
