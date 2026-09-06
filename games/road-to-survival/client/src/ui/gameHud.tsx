@@ -32,6 +32,26 @@ function snapshotPlayers(room: Room): PlayerSnapshot[] {
 
 const INITIAL_TIMELINE: TimelineSnapshot = { week: 1, phase: "active" };
 
+function downloadMarkdown(filename: string, content: string): void {
+  const blob = new Blob([content], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function useWeekExport(room: Room): () => void {
+  useEffect(() => {
+    room.onMessage<string>("export-week-rolls-result", (markdown) => {
+      downloadMarkdown(`week-${room.state.timeline.week}-rolls.md`, markdown);
+    });
+  }, [room]);
+
+  return () => room.send("export-week-rolls");
+}
+
 function useRoomHudState(room: Room): { players: PlayerSnapshot[]; timeline: TimelineSnapshot } {
   const [players, setPlayers] = useState<PlayerSnapshot[]>([]);
   const [timeline, setTimeline] = useState<TimelineSnapshot>(INITIAL_TIMELINE);
@@ -71,10 +91,12 @@ function PlayerRoster({
   players,
   ready,
   adminOverride,
+  onExportWeek,
 }: {
   players: PlayerSnapshot[];
   ready?: { disabled: boolean; onClick: () => void };
   adminOverride?: { onPrevious: () => void; onNext: () => void };
+  onExportWeek?: () => void;
 }) {
   return (
     <div class="game-roster" data-roster-panel>
@@ -105,6 +127,11 @@ function PlayerRoster({
           </button>
         </div>
       ) : null}
+      {onExportWeek ? (
+        <button type="button" data-action="export-week-rolls" onClick={onExportWeek}>
+          Export week
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -112,6 +139,7 @@ function PlayerRoster({
 export function GameHud({ room }: { room: Room }) {
   const { players, timeline } = useRoomHudState(room);
   const me = players.find((p) => p.sessionId === room.sessionId);
+  const exportWeek = useWeekExport(room);
 
   if (timeline.phase === "game-over") {
     return (
@@ -128,6 +156,9 @@ export function GameHud({ room }: { room: Room }) {
         <h2>Week {timeline.week} has ended.</h2>
         {me?.isAdmin ? (
           <div class="game-hud-actions">
+            <button type="button" data-action="export-week-rolls" onClick={exportWeek}>
+              Export week
+            </button>
             <button type="button" data-action="continue" onClick={() => room.send("resolve-week-end", { outcome: "continue" })}>
               Continue to next week
             </button>
@@ -154,6 +185,7 @@ export function GameHud({ room }: { room: Room }) {
             }
           : undefined
       }
+      onExportWeek={me?.isAdmin ? exportWeek : undefined}
     />
   );
 }

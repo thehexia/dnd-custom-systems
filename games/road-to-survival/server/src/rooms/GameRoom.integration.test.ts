@@ -441,3 +441,78 @@ describe("GameRoom vote-skill-check (real Postgres)", () => {
     expect(admin.state.timeline.cards.get("1")?.options[0].voters.includes("vote-current-1")).toBe(true);
   });
 });
+
+function waitForExportResult(room: Room): Promise<string> {
+  return new Promise((resolve) => {
+    room.onMessage<string>("export-week-rolls-result", (markdown) => resolve(markdown));
+  });
+}
+
+describe("GameRoom export-week-rolls (real Postgres)", () => {
+  it("returns a document covering every generated segment's options, DCs, and voters for the admin", async () => {
+    const { rooms } = await createRoomAndJoin("export-admin-1", [], 1);
+    const [admin] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBe(2);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("1")?.options[0].voters.includes("export-admin-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    const exportPromise = waitForExportResult(admin);
+    admin.send("export-week-rolls");
+    const markdown = await exportPromise;
+
+    expect(markdown).toContain("Week 1");
+    expect(markdown).toContain("Segment 1");
+    expect(markdown).toContain("Segment 2");
+    const card1 = admin.state.timeline.cards.get("1")!;
+    for (const option of card1.options) {
+      expect(markdown).toContain(String(option.dc));
+    }
+    expect(markdown).toContain("export-admin-1");
+  });
+
+  it("rejects a non-admin's export request without sending any card or vote data", async () => {
+    const { rooms } = await createRoomAndJoin("export-nonadmin-1", ["export-nonadmin-2"], 1);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBe(2);
+
+    let received = false;
+    other.onMessage("export-week-rolls-result", () => {
+      received = true;
+    });
+
+    other.send("export-week-rolls");
+    // No message confirms rejection, so assert the negative by giving the (non-)effect time to
+    // arrive and then checking nothing was sent -- the admin's own valid request below proves the
+    // room is still responsive, not just slow.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(received).toBe(false);
+
+    const exportPromise = waitForExportResult(admin);
+    admin.send("export-week-rolls");
+    await expect(exportPromise).resolves.toBeTruthy();
+  });
+
+  it("reflects a vote cast after a prior export in a subsequent export", async () => {
+    const { rooms } = await createRoomAndJoin("export-live-1", [], 1);
+    const [admin] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBe(2);
+
+    const firstExportPromise = waitForExportResult(admin);
+    admin.send("export-week-rolls");
+    const firstMarkdown = await firstExportPromise;
+    expect(firstMarkdown).not.toContain("export-live-1");
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("1")?.options[0].voters.includes("export-live-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    const secondExportPromise = waitForExportResult(admin);
+    admin.send("export-week-rolls");
+    const secondMarkdown = await secondExportPromise;
+    expect(secondMarkdown).toContain("export-live-1");
+  });
+});

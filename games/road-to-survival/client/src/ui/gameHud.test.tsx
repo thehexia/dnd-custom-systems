@@ -40,6 +40,7 @@ function makeRoom(options: {
       timeline: { week: 1, segment: 1, daysPerWeek: 5, phase: "active", ...options.timeline },
     },
     send: vi.fn(),
+    onMessage: vi.fn(),
   } as unknown as Room;
 }
 
@@ -110,6 +111,77 @@ describe("week-end phase", () => {
     expect(screen.queryByRole("button", { name: "Continue to next week" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Party dies" })).toBeNull();
     expect(document.querySelector("[data-waiting]")).not.toBeNull();
+  });
+});
+
+describe("export week rolls", () => {
+  it("shows an Export week button for the admin and sends export-week-rolls when clicked", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+    });
+
+    render(<GameHud room={room} />);
+    fireEvent.click(screen.getByRole("button", { name: "Export week" }));
+
+    expect(room.send).toHaveBeenCalledWith("export-week-rolls");
+  });
+
+  it("does not show an Export week button for a non-admin", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "bob", isAdmin: false, ready: false }],
+    });
+
+    render(<GameHud room={room} />);
+
+    expect(screen.queryByRole("button", { name: "Export week" })).toBeNull();
+  });
+
+  it("shows an Export week button for the admin during the week-end decision too", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { phase: "week-end", segment: 10, week: 1 },
+    });
+
+    render(<GameHud room={room} />);
+    fireEvent.click(screen.getByRole("button", { name: "Export week" }));
+
+    expect(room.send).toHaveBeenCalledWith("export-week-rolls");
+  });
+
+  it("saves the received markdown as a downloaded file", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+    });
+
+    let deliverResult: ((markdown: string) => void) | undefined;
+    (room.onMessage as ReturnType<typeof vi.fn>).mockImplementation((type: string, callback: (markdown: string) => void) => {
+      if (type === "export-week-rolls-result") deliverResult = callback;
+    });
+
+    const clickSpy = vi.fn();
+    const realCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      const el = realCreateElement(tagName);
+      if (tagName === "a") el.click = clickSpy;
+      return el;
+    });
+    const createObjectURL = vi.fn(() => "blob:fake-url");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+
+    render(<GameHud room={room} />);
+    deliverResult?.("# Week 1 Rolls");
+
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake-url");
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 });
 

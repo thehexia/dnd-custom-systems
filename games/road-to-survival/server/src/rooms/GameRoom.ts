@@ -11,6 +11,7 @@ import { loadOrCreateWeekCards, upsertVote } from "../db/segmentCards.js";
 import { GameState, PlayerState, SegmentCardOptionState, SegmentCardState } from "./schema/GameState.js";
 import { verifyRoomPassword } from "./roomCredentials.js";
 import { normalizeDaysPerWeek, totalSegments } from "./timeline.js";
+import { formatWeekExport } from "./weekExport.js";
 
 const GENERIC_ACCESS_ERROR = "Invalid room code or password.";
 const ADMIN_PASSWORD_REQUIRED_ERROR = "This is the room creator's username. Enter the room password to reconnect as them.";
@@ -138,6 +139,23 @@ export class GameRoom extends Room<GameState> {
         if (existingIndex !== -1) option.voters.splice(existingIndex, 1);
       }
       cardState.options[optionIndex].voters.push(player.username);
+    });
+
+    this.onMessage("export-week-rolls", (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player?.isAdmin) return;
+
+      const segments = [...this.state.timeline.cards.entries()].map(([segment, card]) => ({
+        segment: Number(segment),
+        options: card.options.map((option) => ({
+          skill: option.skill,
+          dc: option.dc,
+          voters: [...option.voters],
+        })),
+      }));
+
+      const markdown = formatWeekExport(this.state.timeline.week, segments);
+      client.send("export-week-rolls-result", markdown);
     });
 
     this.onMessage<OverrideSegmentMessage>("override-segment", (client, message) => {
