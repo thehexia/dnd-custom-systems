@@ -60,8 +60,19 @@ role assignment.
 ```bash
 # from games/road-to-survival/
 az acr login --name <container_registry_login_server output, without .azurecr.io>
-docker build -f server/Dockerfile -t <login_server>/road-to-survival-server:latest .
+docker build --platform linux/amd64 -f server/Dockerfile -t <login_server>/road-to-survival-server:latest .
 docker push <login_server>/road-to-survival-server:latest
+```
+
+**`--platform linux/amd64` is required on Apple Silicon (and any arm64) machines** —
+Container Apps only runs linux/amd64. Without it, `docker build` defaults to the
+host architecture; the push succeeds and the revision looks healthy right up until
+the container fails at startup with `exec format error` (visible via `az
+containerapp logs show`). Sanity-check before pushing:
+
+```bash
+docker inspect <login_server>/road-to-survival-server:latest --format '{{.Architecture}}/{{.Os}}'
+# must print: amd64/linux
 ```
 
 Then update `terraform.tfvars`:
@@ -98,8 +109,37 @@ Deploy `client/dist` to the Static Web App using the deployment token in the
 `static_web_app_api_key` output (sensitive):
 
 ```bash
-terraform output -raw static_web_app_api_key | \
-  npx @azure/static-web-apps-cli deploy client/dist --deployment-token -
+# from games/road-to-survival/infra
+export SWA_CLI_DEPLOYMENT_TOKEN=$(terraform output -raw static_web_app_api_key)
+cd ../client
+npx @azure/static-web-apps-cli deploy ./dist --env production
+unset SWA_CLI_DEPLOYMENT_TOKEN
+```
+
+`--deployment-token -` (piping the token via stdin) is documented but was rejected
+as invalid by CLI v2.0.10 (`deployment_token provided was invalid`) — use the
+`SWA_CLI_DEPLOYMENT_TOKEN` env var instead. Also pass `--env production` explicitly:
+the CLI defaults to `preview`, which is not what you want for the live site.
+
+## Redeploying the server later
+
+Rebuilding and pushing the same `:latest` tag is not enough on its own —
+`terraform apply` sees no diff on an unchanged image string and won't roll a new
+revision, and `az containerapp update --image ...` with the same tag gets deduped
+by Container Apps for the same reason. Force a new revision explicitly:
+
+```bash
+az containerapp update -n rts-server -g rg-road-to-survival \
+  --image <login_server>/road-to-survival-server:latest \
+  --revision-suffix "redeploy$(date +%Y%m%d%H%M%S)"
+```
+
+Then confirm it's active and healthy:
+
+```bash
+az containerapp revision list -n rts-server -g rg-road-to-survival \
+  --query "[].{name:name, active:properties.active, trafficWeight:properties.trafficWeight}" -o table
+curl https://<container_app_fqdn>/health   # give it ~20-30s if it just scaled from zero
 ```
 
 ## Cost
