@@ -41,6 +41,12 @@ single database — see design.md, Decision 3).
 
 ## Deploying
 
+**Pushes to `main` deploy automatically** via
+`.github/workflows/road-to-survival-deploy.yml` (Terraform apply, server image
+build/push, Container App revision roll, Neon migrations, client build/deploy).
+The steps below are for local dev, a from-scratch bootstrap, or a one-off manual
+fix — not the normal path once CI is set up.
+
 ```bash
 cd games/road-to-survival/infra
 cp terraform.tfvars.example terraform.tfvars   # adjust if needed; stays gitignored
@@ -85,6 +91,13 @@ use_acr_registry = true
 ```bash
 terraform apply
 ```
+
+**Careful running this manually once CI is active** — the workflow tags images
+with the git SHA, not `:latest`, so `container_image` in state won't match this
+`terraform.tfvars`. A manual `terraform apply` here will see that as a diff and
+roll the Container App *back* to whatever `:latest` currently points at. If you
+need a manual redeploy after CI has run, pass the current SHA-tagged image
+explicitly (`-var container_image=...`) instead of relying on `terraform.tfvars`.
 
 ### Apply Prisma migrations against Neon
 

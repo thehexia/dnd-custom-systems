@@ -5,6 +5,10 @@ description: Run/reapply the road-to-survival Azure Terraform (games/road-to-sur
 
 # road-to-survival Terraform deploy
 
+**Pushes to `main` deploy automatically** via
+`.github/workflows/road-to-survival-deploy.yml`. This runbook is for local dev, a
+from-scratch bootstrap, or a one-off manual fix — not the normal path anymore.
+
 Full context: `openspec/changes/road-to-survival-azure-infra/design.md` and
 `games/road-to-survival/infra/README.md`. This skill is the condensed runbook.
 

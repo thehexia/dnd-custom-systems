@@ -1,0 +1,111 @@
+name: road-to-survival deploy
+
+# Assumes the Azure infra was already bootstrapped once by hand (placeholder
+# image, then the real image -- see games/road-to-survival/infra/README.md
+# "Deploying"). This workflow does not do that first-apply chicken-and-egg
+# dance; it expects the ACR, Container App, and Static Web App to already
+# exist in Terraform state.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "games/road-to-survival/**"
+      - ".github/workflows/road-to-survival-deploy.yml"
+
+concurrency:
+  group: road-to-survival-deploy
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  WORKDIR: games/road-to-survival
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ${{ env.WORKDIR }}/package-lock.json
+
+      - name: Install workspace dependencies
+        working-directory: ${{ env.WORKDIR }}
+        run: npm ci
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.1"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.WORKDIR }}/infra
+        run: terraform init -input=false
+
+      - name: Resolve ACR login server
+        id: acr
+        working-directory: ${{ env.WORKDIR }}/infra
+        run: echo "login_server=$(terraform output -raw container_registry_login_server)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push server image
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          LOGIN_SERVER: ${{ steps.acr.outputs.login_server }}
+        run: |
+          az acr login --name "${LOGIN_SERVER%%.*}"
+          docker build --platform linux/amd64 -f server/Dockerfile \
+            -t "$LOGIN_SERVER/road-to-survival-server:$GITHUB_SHA" .
+          docker push "$LOGIN_SERVER/road-to-survival-server:$GITHUB_SHA"
+
+      - name: Terraform apply
+        working-directory: ${{ env.WORKDIR }}/infra
+        env:
+          TF_VAR_neon_database_url: ${{ secrets.NEON_DATABASE_URL }}
+          TF_VAR_container_image: "${{ steps.acr.outputs.login_server }}/road-to-survival-server:${{ github.sha }}"
+          TF_VAR_use_acr_registry: "true"
+        run: terraform apply -auto-approve -input=false
+
+      - name: Capture Terraform outputs
+        id: tf
+        working-directory: ${{ env.WORKDIR }}/infra
+        run: echo "fqdn=$(terraform output -raw container_app_fqdn)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify server health
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS "https://${{ steps.tf.outputs.fqdn }}/health"; then exit 0; fi
+            sleep 5
+          done
+          echo "server did not become healthy in time" >&2
+          exit 1
+
+      - name: Apply Prisma migrations
+        working-directory: ${{ env.WORKDIR }}/server
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Build client
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          VITE_SERVER_URL: "wss://${{ steps.tf.outputs.fqdn }}"
+        run: npm run build --workspace=client
+
+      - name: Deploy client to Static Web Apps
+        working-directory: ${{ env.WORKDIR }}/infra
+        run: |
+          export SWA_CLI_DEPLOYMENT_TOKEN=$(terraform output -raw static_web_app_api_key)
+          npx @azure/static-web-apps-cli deploy ../client/dist --env production
