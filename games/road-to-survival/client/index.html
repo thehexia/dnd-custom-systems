@@ -51,7 +51,15 @@
         margin: 0;
         padding: 0;
         background: var(--theme-bg);
-        transition: background-color 0.7s ease;
+        transition: background-color 0.7s ease-in-out;
+      }
+
+      /* MainScene's applyDayNightTheme() applies the *first* theme instantly (no Phaser tween),
+         but writing data-time-of-day still triggers this CSS transition -- suppress it for that
+         one instant application so the page snaps in sync with the canvas instead of fading in
+         ~0.7s after it. */
+      html.theme-instant, html.theme-instant body {
+        transition: none;
       }
       body { font-family: var(--theme-font-body); }
       #app { display: flex; justify-content: center; align-items: center; height: 100vh; padding-left: 220px; }

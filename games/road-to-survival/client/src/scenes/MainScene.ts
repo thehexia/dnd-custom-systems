@@ -250,7 +250,6 @@ export class MainScene extends Phaser.Scene {
     if (this.isDayTheme === isDay) return;
     const animate = this.isDayTheme !== null;
     this.isDayTheme = isDay;
-    document.documentElement.dataset.timeOfDay = isDay ? "day" : "night";
 
     const targetSky = isDay ? DAY_SKY : NIGHT_SKY;
     const targetStars = isDay ? 0 : 1;
@@ -258,6 +257,13 @@ export class MainScene extends Phaser.Scene {
     const targetJumpButton = isDay ? JUMP_BUTTON_DAY : JUMP_BUTTON_NIGHT;
 
     if (!animate) {
+      // Suppress the page's CSS background transition (index.html) for this one instant
+      // application, so it snaps to match the canvas instead of fading in afterwards.
+      const html = document.documentElement;
+      html.classList.add("theme-instant");
+      html.dataset.timeOfDay = isDay ? "day" : "night";
+      requestAnimationFrame(() => requestAnimationFrame(() => html.classList.remove("theme-instant")));
+
       this.cameras.main.setBackgroundColor(targetSky);
       this.starVisibility = targetStars;
       for (const star of this.stars) star.obj.setAlpha(star.baseAlpha * targetStars);
@@ -268,6 +274,7 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
+    document.documentElement.dataset.timeOfDay = isDay ? "day" : "night";
     this.skyTween?.stop();
     const fromSky = Phaser.Display.Color.IntegerToColor(this.cameras.main.backgroundColor.color);
     const toSky = Phaser.Display.Color.IntegerToColor(targetSky);
