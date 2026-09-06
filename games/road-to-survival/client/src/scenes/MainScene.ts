@@ -1,7 +1,7 @@
 import type { Room } from "colyseus.js";
 import { getStateCallbacks } from "colyseus.js";
 import Phaser from "phaser";
-import { canVoteOnSegment, formatVoters, skillIconKey, skillIconPath, skillLabel, SKILL_SLUGS } from "./skillCheckCard";
+import { canInteractWithOption, canVoteOnSegment, formatVoters, hasVotingRights, skillIconKey, skillIconPath, skillLabel, SKILL_SLUGS } from "./skillCheckCard";
 import { computeVerticalTileLayout, describeSegment, iconKeyForTimeOfDay, nextSelectedSegment, tileVisualState } from "./timeline";
 
 const CONTENT_LEFT = 56;
@@ -57,6 +57,19 @@ const NIGHT_ICON_TINT = 0xfdf4dd;
 
 const FONT_DISPLAY = "MedievalSharp";
 const FONT_BODY = "IM Fell English";
+
+// Hunted Mode's warning tape (see specs/road-to-survival-hunted-mode - Admin Toggles Room Mode):
+// two diagonally-striped bars across the very top and bottom of the canvas, lettered like real
+// hazard tape and continuously scrolling, shown only while the room's mode is "hunted".
+const HUNTED_TAPE_HEIGHT = 26;
+const HUNTED_STRIPE_WIDTH = 22;
+const HUNTED_STRIPE_TEXTURE_KEY = "hunted-tape-stripes";
+const HUNTED_RED = 0xc81e2f;
+const HUNTED_DARK = 0x14100c;
+const HUNTED_TEXT_COLOR = "#fdf4dd";
+const HUNTED_UNIT = "HUNTED   •   ";
+const HUNTED_LABEL = HUNTED_UNIT.repeat(20);
+const HUNTED_SCROLL_SPEED = 30; // px/sec, shared by the stripe texture and the lettering
 
 // The board's ambient theme (sky color behind the panels, plus a star field) tracks whichever
 // segment is currently being viewed and crossfades between these two states -- distinct from
@@ -127,6 +140,32 @@ function rgbToCss({ r, g, b }: { r: number; g: number; b: number }): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+// Fills the band [x, x+width] x [y, y+height] with alternating red/dark parallelograms slanted
+// at 45 degrees, matching real hazard tape's diagonal stripe. Each parallelogram is bounded
+// exactly to the band vertically, so no clip mask is needed; horizontally they run a little past
+// [x, x+width] on both ends (enough to cover the diagonal offset) and the canvas simply clips
+// what falls outside it.
+function drawHazardStripes(g: Phaser.GameObjects.Graphics, x: number, y: number, width: number, height: number): void {
+  const step = HUNTED_STRIPE_WIDTH;
+  const first = -Math.ceil(height / step) - 1;
+  const last = Math.ceil((width + height) / step) + 1;
+
+  for (let i = first; i <= last; i++) {
+    const bx = x + i * step;
+    const isRed = (((i % 2) + 2) % 2) === 0;
+    g.fillStyle(isRed ? HUNTED_RED : HUNTED_DARK, 1);
+    g.fillPoints(
+      [
+        { x: bx, y: y + height },
+        { x: bx + step, y: y + height },
+        { x: bx + step + height, y },
+        { x: bx + height, y },
+      ],
+      true,
+    );
+  }
+}
+
 export class MainScene extends Phaser.Scene {
   private room!: Room;
   private track!: Phaser.GameObjects.Graphics;
@@ -147,6 +186,13 @@ export class MainScene extends Phaser.Scene {
   private isAdmin = false;
   private optionRows: OptionRow[] = [];
   private cardSubscriptions = new Set<string>();
+  private huntedTapeTop!: Phaser.GameObjects.TileSprite;
+  private huntedTapeBottom!: Phaser.GameObjects.TileSprite;
+  private huntedTapeTextTop!: Phaser.GameObjects.Text;
+  private huntedTapeTextBottom!: Phaser.GameObjects.Text;
+  private huntedTapeUnitWidth = 0;
+  private huntedTapeScrollX = 0;
+  private huntedTapeVisible = false;
 
   constructor() {
     super("main");
@@ -186,6 +232,7 @@ export class MainScene extends Phaser.Scene {
       color: "#fdf4dd",
     });
     this.createOptionRows();
+    this.createHuntedTape();
 
     // room.state's nested fields (timeline, players) can briefly be undefined right after
     // join/create resolves, before the first full state sync is decoded -- wait for it instead
@@ -205,6 +252,14 @@ export class MainScene extends Phaser.Scene {
       $(this.room.state).timeline.cards.onAdd((card: SegmentCardStateLike, segmentKey: string) =>
         this.subscribeToCard(segmentKey, card),
       );
+      // leadTokens lives on the local player's own state, not timeline, so a Hunted-Mode
+      // token count being incremented or decremented needs its own subscription to re-render the
+      // card's interactive/locked state (see specs/road-to-survival-skill-check-cards - Voting
+      // Requires a Lead Token in Hunted Mode).
+      const localPlayer = this.room.state.players.get(this.room.sessionId);
+      if (localPlayer) {
+        $(localPlayer).onChange(() => this.renderTimeline());
+      }
       this.renderTimeline();
     });
   }
@@ -338,17 +393,17 @@ export class MainScene extends Phaser.Scene {
       const background = this.add.graphics();
       const zone = this.add.zone(CONTENT_LEFT, y, rowWidth, OPTION_ROW_HEIGHT).setOrigin(0, 0);
       const icon = this.add.image(OPTION_ICON_LEFT + OPTION_ICON_SIZE / 2, y + OPTION_ROW_HEIGHT / 2, "sun").setDisplaySize(OPTION_ICON_SIZE, OPTION_ICON_SIZE);
-      const skillText = this.add.text(OPTION_TEXT_LEFT, y + 8, "", {
+      const skillText = this.add.text(OPTION_TEXT_LEFT, y + 6, "", {
         fontSize: "18px",
         fontFamily: FONT_DISPLAY,
         color: "#fdf4dd",
       });
-      const dcText = this.add.text(OPTION_TEXT_LEFT, y + 34, "", {
-        fontSize: "13px",
-        fontFamily: FONT_BODY,
-        color: "#ecdcb3",
+      const dcText = this.add.text(OPTION_TEXT_LEFT, y + 27, "", {
+        fontSize: "26px",
+        fontFamily: FONT_DISPLAY,
+        color: "#ffc61a",
       });
-      const votersText = this.add.text(OPTION_TEXT_LEFT, y + 54, "", {
+      const votersText = this.add.text(OPTION_TEXT_LEFT, y + 59, "", {
         fontSize: "12px",
         fontFamily: FONT_BODY,
         color: "#9fd3f2",
@@ -361,13 +416,102 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  // Builds (once, statically -- geometry never depends on state) the hunted-mode warning tape:
+  // two lettered hazard-stripe bars across the top and bottom of the canvas, hidden until
+  // renderTimeline() shows them for a "hunted" mode room, and continuously scrolled by update()
+  // for a "tape in motion" feel. Given a high depth so they always sit above the content card,
+  // nav bar, and star field regardless of creation order.
+  private createHuntedTape(): void {
+    // A single tile, one full red/dark stripe cycle wide (drawHazardStripes' diagonal repeats
+    // with period 2 * HUNTED_STRIPE_WIDTH at any fixed height), baked into a texture so the two
+    // bars can be TileSprites -- scrolling a TileSprite's tilePositionX is far cheaper than
+    // redrawing Graphics geometry every frame.
+    if (!this.textures.exists(HUNTED_STRIPE_TEXTURE_KEY)) {
+      const tileWidth = HUNTED_STRIPE_WIDTH * 2;
+      const tileGraphics = this.add.graphics();
+      drawHazardStripes(tileGraphics, 0, 0, tileWidth, HUNTED_TAPE_HEIGHT);
+      tileGraphics.generateTexture(HUNTED_STRIPE_TEXTURE_KEY, tileWidth, HUNTED_TAPE_HEIGHT);
+      tileGraphics.destroy();
+    }
+
+    this.huntedTapeTop = this.add
+      .tileSprite(0, 0, this.scale.width, HUNTED_TAPE_HEIGHT, HUNTED_STRIPE_TEXTURE_KEY)
+      .setOrigin(0, 0)
+      .setDepth(1000)
+      .setVisible(false);
+    this.huntedTapeBottom = this.add
+      .tileSprite(0, this.scale.height - HUNTED_TAPE_HEIGHT, this.scale.width, HUNTED_TAPE_HEIGHT, HUNTED_STRIPE_TEXTURE_KEY)
+      .setOrigin(0, 0)
+      .setDepth(1000)
+      .setVisible(false);
+
+    const tapeTextStyle = {
+      fontSize: "15px",
+      fontFamily: FONT_DISPLAY,
+      color: HUNTED_TEXT_COLOR,
+      fontStyle: "bold",
+      stroke: "#000000",
+      strokeThickness: 3,
+    };
+    this.huntedTapeTextTop = this.add
+      .text(0, HUNTED_TAPE_HEIGHT / 2, HUNTED_LABEL, tapeTextStyle)
+      .setOrigin(0, 0.5)
+      .setDepth(1001)
+      .setVisible(false);
+    this.huntedTapeTextBottom = this.add
+      .text(0, this.scale.height - HUNTED_TAPE_HEIGHT / 2, HUNTED_LABEL, tapeTextStyle)
+      .setOrigin(0, 0.5)
+      .setDepth(1001)
+      .setVisible(false);
+
+    // The label loops seamlessly by resetting the scroll offset every time it advances by one
+    // full unit's width, so it must be measured in this exact font/size rather than guessed.
+    const measure = this.add.text(0, 0, HUNTED_UNIT, tapeTextStyle).setVisible(false);
+    this.huntedTapeUnitWidth = measure.width;
+    measure.destroy();
+  }
+
+  // Scrolls the hunted-tape stripes and lettering leftward in lockstep, only while the tape is
+  // actually shown (see renderTimeline's mode toggle). The stripe TileSprites scroll infinitely
+  // for free via tilePositionX; the lettering resets by exactly one unit's width every time it
+  // has scrolled that far, which is seamless because the label is that same unit repeated.
+  update(_time: number, delta: number): void {
+    if (!this.huntedTapeVisible) return;
+
+    const distance = (delta / 1000) * HUNTED_SCROLL_SPEED;
+    this.huntedTapeTop.tilePositionX += distance;
+    this.huntedTapeBottom.tilePositionX += distance;
+
+    if (this.huntedTapeUnitWidth <= 0) return;
+    this.huntedTapeScrollX -= distance;
+    if (this.huntedTapeScrollX <= -this.huntedTapeUnitWidth) {
+      this.huntedTapeScrollX += this.huntedTapeUnitWidth;
+    }
+    this.huntedTapeTextTop.setX(this.huntedTapeScrollX);
+    this.huntedTapeTextBottom.setX(this.huntedTapeScrollX);
+  }
+
   // Renders the selected segment's skill-check card into the already-created option rows (see
   // createOptionRows). Reads live off room.state rather than caching card data locally -- the
   // MapSchema/ArraySchema instances are mutated in place by colyseus.js as patches arrive.
   private renderCard(): void {
     if (this.selectedSegment === null) return;
     const card: SegmentCardStateLike | undefined = this.room.state.timeline.cards.get(String(this.selectedSegment));
-    const votable = canVoteOnSegment(this.selectedSegment, this.room.state.timeline.segment, this.room.state.timeline.phase);
+    const onCurrentActiveSegment = canVoteOnSegment(
+      this.selectedSegment,
+      this.room.state.timeline.segment,
+      this.room.state.timeline.phase,
+    );
+    const localPlayer = this.room.state.players.get(this.room.sessionId);
+    const canPlaceVote =
+      onCurrentActiveSegment && hasVotingRights(this.room.state.timeline.mode, localPlayer?.leadTokens ?? 0);
+    // The row the local player already has an active vote on stays interactive even when
+    // canPlaceVote is false, so they can retract it (see specs/road-to-survival-skill-check-cards
+    // - Vote Retraction) without needing to hold a Lead token.
+    const localUsername = localPlayer?.username;
+    const currentVoteIndex = localUsername
+      ? (card?.options.findIndex((option) => option.voters.includes(localUsername)) ?? -1)
+      : -1;
 
     for (let i = 0; i < this.optionRows.length; i++) {
       const row = this.optionRows[i];
@@ -394,6 +538,7 @@ export class MainScene extends Phaser.Scene {
       row.dcText.setText(`DC ${option.dc}`);
       row.votersText.setText(formatVoters(option.voters));
 
+      const votable = onCurrentActiveSegment && canInteractWithOption(canPlaceVote, i === currentVoteIndex);
       if (votable) {
         row.zone.setInteractive({ useHandCursor: true });
       } else {
@@ -401,7 +546,7 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    this.syncCardToDom(card, votable);
+    this.syncCardToDom(card, canPlaceVote);
   }
 
   // Canvas-rendered card content has no DOM representation for e2e tests to read, so mirror it
@@ -492,8 +637,14 @@ export class MainScene extends Phaser.Scene {
   private renderTimeline(): void {
     if (!this.navLayout) return;
 
-    const { week, segment, phase } = this.room.state.timeline;
+    const { week, segment, phase, mode } = this.room.state.timeline;
     const { navX, tileHeight, positions, total } = this.navLayout;
+
+    this.huntedTapeVisible = mode === "hunted";
+    this.huntedTapeTop.setVisible(this.huntedTapeVisible);
+    this.huntedTapeBottom.setVisible(this.huntedTapeVisible);
+    this.huntedTapeTextTop.setVisible(this.huntedTapeVisible);
+    this.huntedTapeTextBottom.setVisible(this.huntedTapeVisible);
 
     this.selectedSegment = nextSelectedSegment(this.selectedSegment, this.lastKnownCurrentSegment, segment);
     this.lastKnownCurrentSegment = segment;

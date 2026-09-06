@@ -25,19 +25,45 @@ interface FakePlayer {
   username: string;
   isAdmin: boolean;
   ready: boolean;
+  skipVote?: boolean;
+  leadTokens?: number;
 }
 
 function makeRoom(options: {
   sessionId?: string;
   players?: FakePlayer[];
-  timeline?: Partial<{ week: number; segment: number; daysPerWeek: number; phase: string }>;
+  timeline?: Partial<{
+    week: number;
+    segment: number;
+    daysPerWeek: number;
+    phase: string;
+    mode: string;
+    skipConfirmationAvailable: boolean;
+    leadTokenAssignmentAvailable: boolean;
+    currentSegmentHasActiveVote: boolean;
+  }>;
 }): Room {
-  const players = new Map((options.players ?? []).map((p) => [p.sessionId, p]));
+  const players = new Map(
+    (options.players ?? []).map((p) => [
+      p.sessionId,
+      { skipVote: false, leadTokens: 0, ...p },
+    ]),
+  );
   return {
     sessionId: options.sessionId ?? "me",
     state: {
       players,
-      timeline: { week: 1, segment: 1, daysPerWeek: 5, phase: "active", ...options.timeline },
+      timeline: {
+        week: 1,
+        segment: 1,
+        daysPerWeek: 5,
+        phase: "active",
+        mode: "normal",
+        skipConfirmationAvailable: false,
+        leadTokenAssignmentAvailable: false,
+        currentSegmentHasActiveVote: false,
+        ...options.timeline,
+      },
     },
     send: vi.fn(),
     onMessage: vi.fn(),
@@ -79,6 +105,247 @@ describe("active phase", () => {
     const bobTab = screen.getByText("bob").closest("[data-ready]");
     expect(aliceTab?.getAttribute("data-ready")).toBe("true");
     expect(bobTab?.getAttribute("data-ready")).toBe("false");
+  });
+});
+
+describe("Hunted Mode toggle", () => {
+  it("shows an admin-only control that enables hunted mode", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+    });
+
+    render(<GameHud room={room} />);
+    fireEvent.click(screen.getByRole("button", { name: "Enable Hunted Mode" }));
+
+    expect(room.send).toHaveBeenCalledWith("set-mode", { mode: "hunted" });
+  });
+
+  it("switches back to normal mode from a hunted room", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { mode: "hunted" },
+    });
+
+    render(<GameHud room={room} />);
+    fireEvent.click(screen.getByRole("button", { name: "Disable Hunted Mode" }));
+
+    expect(room.send).toHaveBeenCalledWith("set-mode", { mode: "normal" });
+  });
+
+  it("is not shown to a non-admin", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "bob", isAdmin: false, ready: false }],
+    });
+
+    render(<GameHud room={room} />);
+
+    expect(screen.queryByRole("button", { name: "Enable Hunted Mode" })).toBeNull();
+  });
+
+  it("is available to the admin during the week-end and game-over views too", () => {
+    const weekEndRoom = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { phase: "week-end", segment: 10, week: 1 },
+    });
+    render(<GameHud room={weekEndRoom} />);
+    expect(screen.getByRole("button", { name: "Enable Hunted Mode" })).toBeTruthy();
+    document.body.innerHTML = "";
+
+    const gameOverRoom = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { phase: "game-over", week: 3 },
+    });
+    render(<GameHud room={gameOverRoom} />);
+    expect(screen.getByRole("button", { name: "Enable Hunted Mode" })).toBeTruthy();
+  });
+});
+
+describe("Hunted Mode Forced March vote", () => {
+  it("shows a Forced March control with the current tally (excluding the admin) and sends vote-skip when clicked", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [
+        { sessionId: "admin", username: "admin", isAdmin: true, ready: false, skipVote: false },
+        { sessionId: "me", username: "alice", isAdmin: false, ready: false, skipVote: false },
+        { sessionId: "other", username: "bob", isAdmin: false, ready: false, skipVote: true },
+      ],
+      timeline: { mode: "hunted" },
+    });
+
+    render(<GameHud room={room} />);
+    const button = screen.getByRole("button", { name: "Forced March (1/2)" });
+    fireEvent.click(button);
+
+    expect(room.send).toHaveBeenCalledWith("vote-skip");
+  });
+
+  it("disables the control once the local player has already voted", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: false, ready: false, skipVote: true }],
+      timeline: { mode: "hunted" },
+    });
+
+    render(<GameHud room={room} />);
+
+    expect((screen.getByRole("button", { name: "Marching! (1/1)" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("is not shown while the room is in normal mode", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: false, ready: false }],
+    });
+
+    render(<GameHud room={room} />);
+
+    expect(screen.queryByRole("button", { name: /Forced March/ })).toBeNull();
+  });
+
+  it("disables the control for the admin, with an explanatory message, and never sends vote-skip", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { mode: "hunted" },
+    });
+
+    render(<GameHud room={room} />);
+
+    const button = screen.getByRole("button", { name: "Marching! (0/0)" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText("The admin doesn't vote on the Forced March.")).toBeTruthy();
+  });
+
+  it("disables the control for a non-admin, with an explanatory message, while a skill-check vote is active on the current segment", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: false, ready: false }],
+      timeline: { mode: "hunted", currentSegmentHasActiveVote: true },
+    });
+
+    render(<GameHud room={room} />);
+
+    const button = screen.getByRole("button", { name: "Marching! (0/1)" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText("Someone has already voted to roll a check this segment.")).toBeTruthy();
+  });
+});
+
+describe("Hunted Mode Forced March confirmation", () => {
+  it("lets the admin confirm once a majority is reached, and disables it otherwise", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { mode: "hunted", skipConfirmationAvailable: true },
+    });
+
+    render(<GameHud room={room} />);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Forced March" }));
+
+    expect(room.send).toHaveBeenCalledWith("confirm-skip");
+  });
+
+  it("disables the control when no majority is awaiting confirmation", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { mode: "hunted", skipConfirmationAvailable: false },
+    });
+
+    render(<GameHud room={room} />);
+
+    expect((screen.getByRole("button", { name: "Confirm Forced March" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("is not shown to a non-admin", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "bob", isAdmin: false, ready: false }],
+      timeline: { mode: "hunted", skipConfirmationAvailable: true },
+    });
+
+    render(<GameHud room={room} />);
+
+    expect(screen.queryByRole("button", { name: "Confirm Forced March" })).toBeNull();
+  });
+});
+
+describe("Hunted Mode Lead token assignment", () => {
+  it("lets the admin assign Lead tokens once available, and disables it otherwise", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { mode: "hunted", leadTokenAssignmentAvailable: true },
+    });
+
+    render(<GameHud room={room} />);
+    fireEvent.click(screen.getByRole("button", { name: "Assign Lead Tokens" }));
+
+    expect(room.send).toHaveBeenCalledWith("assign-lead-tokens");
+  });
+
+  it("disables the control when no assignment is available", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { mode: "hunted", leadTokenAssignmentAvailable: false },
+    });
+
+    render(<GameHud room={room} />);
+
+    expect((screen.getByRole("button", { name: "Assign Lead Tokens" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("is not shown to a non-admin", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "bob", isAdmin: false, ready: false }],
+      timeline: { mode: "hunted", leadTokenAssignmentAvailable: true },
+    });
+
+    render(<GameHud room={room} />);
+
+    expect(screen.queryByRole("button", { name: "Assign Lead Tokens" })).toBeNull();
+  });
+
+  it("is available to the admin during the week-end view too", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [{ sessionId: "me", username: "alice", isAdmin: true, ready: false }],
+      timeline: { phase: "week-end", segment: 10, week: 1, mode: "hunted", leadTokenAssignmentAvailable: true },
+    });
+
+    render(<GameHud room={room} />);
+    fireEvent.click(screen.getByRole("button", { name: "Assign Lead Tokens" }));
+
+    expect(room.send).toHaveBeenCalledWith("assign-lead-tokens");
+  });
+});
+
+describe("Lead token roster indicator", () => {
+  it("shows a count badge for a player holding Lead tokens, and none for a player without any", () => {
+    const room = makeRoom({
+      sessionId: "me",
+      players: [
+        { sessionId: "me", username: "alice", isAdmin: true, ready: false, leadTokens: 2 },
+        { sessionId: "other", username: "bob", isAdmin: false, ready: false, leadTokens: 0 },
+      ],
+      timeline: { mode: "hunted" },
+    });
+
+    render(<GameHud room={room} />);
+
+    const aliceTab = screen.getByText("alice").closest("[data-lead-tokens]");
+    const bobTab = screen.getByText("bob").closest("[data-lead-tokens]");
+    expect(aliceTab?.getAttribute("data-lead-tokens")).toBe("2");
+    expect(bobTab?.getAttribute("data-lead-tokens")).toBe("0");
+    expect(aliceTab?.querySelector("[data-lead-token-badge]")?.textContent).toContain("2");
+    expect(bobTab?.querySelector("[data-lead-token-badge]")).toBeNull();
   });
 });
 

@@ -189,9 +189,12 @@
         width: 220px;
         padding: 16px 18px;
         text-align: left;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
       }
       .game-roster-heading {
-        margin: 0 0 10px;
+        margin: 0;
         font-family: var(--theme-font-display);
         font-size: 13px;
         font-weight: normal;
@@ -201,7 +204,7 @@
       }
       .game-roster-list {
         list-style: none;
-        margin: 0 0 14px;
+        margin: 0;
         padding: 0;
         display: flex;
         flex-direction: column;
@@ -263,7 +266,13 @@
         color: #0d2818;
       }
       .game-roster button { width: 100%; }
-      .game-roster-override { display: flex; gap: 6px; margin-top: 8px; }
+      .game-roster-hint {
+        margin: 0;
+        font-size: 11px;
+        color: var(--theme-text-muted);
+        text-align: center;
+      }
+      .game-roster-override { display: flex; gap: 6px; }
       .game-roster-override button { width: auto; flex: 1; padding: 8px 6px; font-size: 12px; }
 
       #connection-status {

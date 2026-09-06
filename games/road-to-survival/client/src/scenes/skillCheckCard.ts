@@ -47,3 +47,21 @@ export function formatVoters(voters: string[]): string {
 export function canVoteOnSegment(selectedSegment: number, currentSegment: number, phase: string): boolean {
   return selectedSegment === currentSegment && phase === "active";
 }
+
+// In Hunted Mode, only a player holding at least one Lead token may cast a new vote or change to
+// a different option (see specs/road-to-survival-skill-check-cards - Voting Requires a Lead
+// Token in Hunted Mode); a player may hold more than one. Normal Mode voting is unrestricted by
+// token count. This gate does NOT apply to retracting an existing vote -- see
+// canInteractWithOption below.
+export function hasVotingRights(mode: string, leadTokens: number): boolean {
+  return mode !== "hunted" || leadTokens > 0;
+}
+
+// A specific option row is interactive if the player is currently allowed to cast a new vote or
+// change to a different option (canPlaceVote), OR if this is the option they already have an
+// active vote on -- retracting is always allowed regardless of Lead-token count (see
+// specs/road-to-survival-skill-check-cards - Vote Retraction), so a player at zero tokens must
+// still be able to click their own already-voted row.
+export function canInteractWithOption(canPlaceVote: boolean, isOwnActiveVote: boolean): boolean {
+  return canPlaceVote || isOwnActiveVote;
+}

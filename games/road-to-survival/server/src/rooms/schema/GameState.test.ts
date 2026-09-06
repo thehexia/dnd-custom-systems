@@ -9,11 +9,17 @@ describe("GameState defaults", () => {
     expect(state.timeline.week).toBe(1);
     expect(state.timeline.segment).toBe(1);
     expect(state.timeline.phase).toBe("active");
+    expect(state.timeline.mode).toBe("normal");
+    expect(state.timeline.skipConfirmationAvailable).toBe(false);
+    expect(state.timeline.leadTokenAssignmentAvailable).toBe(false);
+    expect(state.timeline.currentSegmentHasActiveVote).toBe(false);
   });
 
-  it("defaults a new player to not ready", () => {
+  it("defaults a new player to not ready, not skip-voted, and holding no Lead tokens", () => {
     const player = new PlayerState();
 
     expect(player.ready).toBe(false);
+    expect(player.skipVote).toBe(false);
+    expect(player.leadTokens).toBe(0);
   });
 });

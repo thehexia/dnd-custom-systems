@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "./prisma.js";
 import { createRoomPlayer } from "./rooms.js";
-import { loadOrCreateWeekCards, upsertVote } from "./segmentCards.js";
+import { deleteVote, loadOrCreateWeekCards, upsertVote } from "./segmentCards.js";
 
 function uniqueCode(): string {
   return `T${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}`;
@@ -105,5 +105,27 @@ describe("upsertVote against real Postgres", () => {
     const votes = await prisma.roomSegmentVote.findMany({ where: { cardId: card.id, roomPlayerId: player.id } });
     expect(votes).toHaveLength(1);
     expect(votes[0].optionIndex).toBe(3);
+  });
+});
+
+describe("deleteVote against real Postgres", () => {
+  it("removes an existing vote row", async () => {
+    const room = await createTestRoom();
+    const player = await createRoomPlayer(room.id, "dave", false);
+    const [card] = await loadOrCreateWeekCards(room.id, 1, 1);
+    await upsertVote(card.id, player.id, 0);
+
+    await deleteVote(card.id, player.id);
+
+    const votes = await prisma.roomSegmentVote.findMany({ where: { cardId: card.id, roomPlayerId: player.id } });
+    expect(votes).toHaveLength(0);
+  });
+
+  it("does not throw when no matching vote exists", async () => {
+    const room = await createTestRoom();
+    const player = await createRoomPlayer(room.id, "erin", false);
+    const [card] = await loadOrCreateWeekCards(room.id, 1, 1);
+
+    await expect(deleteVote(card.id, player.id)).resolves.not.toThrow();
   });
 });

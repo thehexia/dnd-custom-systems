@@ -66,6 +66,28 @@ async function driveToWeekEnd(rooms: Room[], daysPerWeek: number): Promise<void>
   }
 }
 
+/**
+ * Switches the room to hunted mode, drives one confirmed Forced March (segment 1 -> 2), and has
+ * the admin assign the resulting Lead token to both players -- the minimum setup any hunted-mode
+ * voting test needs, since a token can only ever be granted following a confirmed Forced March.
+ * Only `other` votes -- the admin never casts a Forced March vote (see specs/road-to-survival-
+ * hunted-mode - Forced March Vote), and with a single connected non-admin player, that one vote
+ * alone already exceeds half of the non-admin total.
+ */
+async function forcedMarchAndAssignOneTokenEach(admin: Room, other: Room): Promise<void> {
+  admin.send("set-mode", { mode: "hunted" });
+  await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+  other.send("vote-skip");
+  await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+  admin.send("confirm-skip");
+  await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+  await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(true);
+
+  admin.send("assign-lead-tokens");
+  await expect.poll(() => admin.state.players.get(admin.sessionId)?.leadTokens, { timeout: 5_000 }).toBe(1);
+}
+
 describe("GameRoom onCreate + onJoin (real Postgres)", () => {
   it("persists a room and marks the creator as admin", async () => {
     const room = await colyseus.sdk.create("game", { action: "create", username: "creator" });
@@ -439,6 +461,801 @@ describe("GameRoom vote-skill-check (real Postgres)", () => {
     // The vote cast while segment 1 was current stays recorded there -- it isn't retroactively
     // moved just because a later vote was cast on segment 2's card.
     expect(admin.state.timeline.cards.get("1")?.options[0].voters.includes("vote-current-1")).toBe(true);
+  });
+});
+
+describe("GameRoom set-mode (real Postgres)", () => {
+  it("admin switches the room to hunted mode and back to normal", async () => {
+    const { rooms } = await createRoomAndJoin("mode-1");
+    const [admin] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    admin.send("set-mode", { mode: "normal" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("normal");
+  });
+
+  it("rejects a non-admin's attempt to change the room's mode", async () => {
+    const { rooms } = await createRoomAndJoin("mode-nonadmin-1", ["mode-nonadmin-2"]);
+    const [admin, other] = rooms;
+
+    other.send("set-mode", { mode: "hunted" });
+    // No message confirms rejection, so assert the negative by giving the (non-)effect time to
+    // arrive and then checking state is unchanged -- the admin's own valid switch below proves
+    // the room is still responsive, not just slow.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.mode).toBe("normal");
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+  });
+
+  it("resets every player's Lead token count to zero when switching back to normal mode", async () => {
+    const { rooms } = await createRoomAndJoin("mode-clear-1", ["mode-clear-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    // Two confirmed Forced Marches and assignments so each player accumulates 2 tokens --
+    // proves the reset zeroes out an accumulated count, not just a single token.
+    for (let round = 0; round < 2; round++) {
+      other.send("vote-skip");
+      await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+      admin.send("confirm-skip");
+      await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(true);
+      admin.send("assign-lead-tokens");
+      await expect
+        .poll(() => admin.state.players.get(admin.sessionId)?.leadTokens, { timeout: 5_000 })
+        .toBe(round + 1);
+    }
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(2);
+
+    admin.send("set-mode", { mode: "normal" });
+    await expect.poll(() => admin.state.players.get(admin.sessionId)?.leadTokens, { timeout: 5_000 }).toBe(0);
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(0);
+  });
+});
+
+describe("GameRoom vote-skip / Forced March majority (real Postgres)", () => {
+  it("marks the Forced March as awaiting admin confirmation once a majority of non-admin players vote, without advancing", async () => {
+    const { rooms } = await createRoomAndJoin("skip-majority-1", ["skip-majority-2", "skip-majority-3"]);
+    const [admin, b, c] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    // Two connected non-admin players (b, c) -- a majority needs both.
+    b.send("vote-skip");
+    await expect.poll(() => admin.state.players.get(b.sessionId)?.skipVote, { timeout: 5_000 }).toBe(true);
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+    expect(admin.state.timeline.segment).toBe(1);
+
+    c.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    // Reaching a majority alone never advances the timeline -- only a subsequent admin
+    // confirmation does (see the "GameRoom confirm-skip" tests below).
+    expect(admin.state.timeline.segment).toBe(1);
+  });
+
+  it("does not mark confirmation available when only half of connected non-admin players have voted", async () => {
+    const { rooms } = await createRoomAndJoin("skip-short-1", ["skip-short-2", "skip-short-3"]);
+    const [admin, b] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    // Two connected non-admin players; only one votes -- not a majority (1 is not > 1).
+    b.send("vote-skip");
+    await expect.poll(() => admin.state.players.get(b.sessionId)?.skipVote, { timeout: 5_000 }).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+    expect(admin.state.timeline.segment).toBe(1);
+  });
+
+  it("excludes a disconnected player from the majority calculation", async () => {
+    const { rooms } = await createRoomAndJoin("skip-disconnect-1", [
+      "skip-disconnect-2",
+      "skip-disconnect-3",
+      "skip-disconnect-4",
+    ]);
+    const [admin, b, c, d] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    // Three connected non-admin players (b, c, d); only b votes -- not a majority (1 is not >
+    // 1.5).
+    b.send("vote-skip");
+    await expect.poll(() => admin.state.players.get(b.sessionId)?.skipVote, { timeout: 5_000 }).toBe(true);
+
+    await d.leave();
+    // With d (a non-voter) gone, 2 non-admin players remain (b, c); b's 1 vote is still not a
+    // majority (1 is not > 1), so confirmation should not become available from d leaving alone.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+
+    c.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+  });
+
+  it("clears the awaiting-confirmation state if the majority is lost before the admin confirms", async () => {
+    const { rooms } = await createRoomAndJoin("skip-lost-majority-1", [
+      "skip-lost-majority-2",
+      "skip-lost-majority-3",
+      "skip-lost-majority-4",
+    ]);
+    const [admin, b, c] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    // Three connected non-admin players; b and c vote -- a majority (2 > 1.5), with the fourth
+    // player (d) never voting.
+    b.send("vote-skip");
+    c.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+
+    await b.leave();
+    // With b (a voter) gone, 2 non-admin players remain (c, d); only c's 1 vote remains -- the
+    // previously-reached majority is no longer met, so the awaiting-confirmation state clears.
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(false);
+    expect(admin.state.timeline.segment).toBe(1);
+  });
+
+  it("rejects a Forced March vote while the room is in normal mode", async () => {
+    const { rooms } = await createRoomAndJoin("skip-normal-1", ["skip-normal-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("vote-skip");
+    other.send("vote-skip");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.segment).toBe(1);
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+    expect(admin.state.players.get(admin.sessionId)?.skipVote).toBe(false);
+  });
+
+  it("rejects a Forced March vote outside the active phase", async () => {
+    const { rooms } = await createRoomAndJoin("skip-inactive-1", ["skip-inactive-2"], 1);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    await driveToWeekEnd(rooms, 1);
+
+    admin.send("vote-skip");
+    other.send("vote-skip");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.phase).toBe("week-end");
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+    expect(admin.state.timeline.segment).toBe(2);
+  });
+});
+
+describe("GameRoom Forced March: admin exclusion & skill-check-vote lockout (real Postgres)", () => {
+  it("rejects the admin's Forced March vote and never records it", async () => {
+    const { rooms } = await createRoomAndJoin("fm-admin-1", ["fm-admin-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    admin.send("vote-skip");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.players.get(admin.sessionId)?.skipVote).toBe(false);
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+
+    // The admin's own vote never counts toward the total either -- a single connected non-admin
+    // player reaches majority alone.
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+  });
+
+  it("rejects any player's Forced March vote while a skill-check vote is active on the current segment, from a fresh voter and from the admin", async () => {
+    const { rooms } = await createRoomAndJoin("fm-lock-1", ["fm-lock-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    // Cast the skill-check vote before switching to hunted mode, so it's unaffected by the
+    // Lead-token eligibility gate -- the lockout under test here cares only that an active vote
+    // exists on the current segment, not how it got there.
+    other.send("vote-skill-check", { optionIndex: 0 });
+    await expect.poll(() => admin.state.timeline.currentSegmentHasActiveVote, { timeout: 5_000 }).toBe(true);
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    admin.send("vote-skip");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.players.get(other.sessionId)?.skipVote).toBe(false);
+    expect(admin.state.players.get(admin.sessionId)?.skipVote).toBe(false);
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+  });
+
+  it("becomes available again once the last active skill-check vote on the segment is retracted", async () => {
+    const { rooms } = await createRoomAndJoin("fm-unlock-1", ["fm-unlock-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    other.send("vote-skill-check", { optionIndex: 0 });
+    await expect.poll(() => admin.state.timeline.currentSegmentHasActiveVote, { timeout: 5_000 }).toBe(true);
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.players.get(other.sessionId)?.skipVote).toBe(false);
+
+    // Retracting (re-selecting the same option) removes the last active vote -- allowed
+    // regardless of Lead-token count, in either mode.
+    other.send("vote-skill-check", { optionIndex: 0 });
+    await expect.poll(() => admin.state.timeline.currentSegmentHasActiveVote, { timeout: 5_000 }).toBe(false);
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.players.get(other.sessionId)?.skipVote, { timeout: 5_000 }).toBe(true);
+  });
+
+  it("casting or changing a skill-check vote clears every player's Forced March vote and an already-reached majority awaiting confirmation", async () => {
+    const { rooms } = await createRoomAndJoin("fm-clear-1", ["fm-clear-2", "fm-clear-3"]);
+    const [admin, b, c] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    // A first confirmed Forced March grants b and c each a Lead token, landing on segment 2.
+    b.send("vote-skip");
+    c.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+    await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("assign-lead-tokens");
+    await expect.poll(() => admin.state.players.get(b.sessionId)?.leadTokens, { timeout: 5_000 }).toBe(1);
+
+    // A second Forced March vote reaches majority again, awaiting confirmation.
+    b.send("vote-skip");
+    c.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+
+    // b spends their token to roll a check instead -- this withdraws the party's Forced March,
+    // even though a majority was already awaiting the admin's confirmation.
+    b.send("vote-skill-check", { optionIndex: 0 });
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(false);
+    expect(admin.state.players.get(b.sessionId)?.skipVote).toBe(false);
+    expect(admin.state.players.get(c.sessionId)?.skipVote).toBe(false);
+
+    // The admin can no longer confirm -- nothing is awaiting it.
+    admin.send("confirm-skip");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.segment).toBe(2);
+  });
+
+  it("does not clear a subsequently-cast Forced March vote when an earlier skill-check vote was only retracted", async () => {
+    const { rooms } = await createRoomAndJoin("fm-retract-noop-1", ["fm-retract-noop-2", "fm-retract-noop-3"]);
+    const [admin, b, c] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    // c casts, then retracts, a skill-check vote in normal mode before the room switches to
+    // hunted -- the retraction alone must not interfere with the Forced March vote cast
+    // afterward.
+    c.send("vote-skill-check", { optionIndex: 0 });
+    await expect.poll(() => admin.state.timeline.currentSegmentHasActiveVote, { timeout: 5_000 }).toBe(true);
+    c.send("vote-skill-check", { optionIndex: 0 });
+    await expect.poll(() => admin.state.timeline.currentSegmentHasActiveVote, { timeout: 5_000 }).toBe(false);
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    b.send("vote-skip");
+    await expect.poll(() => admin.state.players.get(b.sessionId)?.skipVote, { timeout: 5_000 }).toBe(true);
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+
+    c.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    expect(admin.state.players.get(b.sessionId)?.skipVote).toBe(true);
+    expect(admin.state.players.get(c.sessionId)?.skipVote).toBe(true);
+  });
+
+  it("recomputes currentSegmentHasActiveVote across a ready-up advance (the same advanceSegment() path a confirmed Forced March shares), a forward override, a backward override, and a week rollover", async () => {
+    const { rooms } = await createRoomAndJoin("fm-recompute-1", ["fm-recompute-2"], 1);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBe(2);
+
+    // Ready-up advance: a fresh vote on the new segment sets the flag, an override backward
+    // clears it again (segment 1's card has no votes), then forward restores it.
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    other.send("ready");
+    await expect.poll(() => admin.state.players.get(other.sessionId)?.ready, { timeout: 5_000 }).toBe(true);
+    admin.send("ready");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+    expect(admin.state.timeline.currentSegmentHasActiveVote).toBe(false);
+
+    other.send("vote-skill-check", { optionIndex: 0 });
+    await expect.poll(() => admin.state.timeline.currentSegmentHasActiveVote, { timeout: 5_000 }).toBe(true);
+
+    admin.send("override-segment", { direction: "previous" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(1);
+    expect(admin.state.timeline.currentSegmentHasActiveVote).toBe(true);
+
+    admin.send("override-segment", { direction: "next" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+    expect(admin.state.timeline.currentSegmentHasActiveVote).toBe(true);
+
+    // Week rollover (daysPerWeek 1 -> segment 2 is the last segment of the week): the new week's
+    // segment 1 starts with no votes.
+    admin.send("ready");
+    other.send("ready");
+    await expect.poll(() => admin.state.timeline.phase, { timeout: 5_000 }).toBe("week-end");
+    admin.send("resolve-week-end", { outcome: "continue" });
+    await expect.poll(() => admin.state.timeline.week, { timeout: 5_000 }).toBe(2);
+    expect(admin.state.timeline.currentSegmentHasActiveVote).toBe(false);
+  });
+});
+
+describe("GameRoom confirm-skip (real Postgres)", () => {
+  it("admin confirms a majority Forced March vote, advancing the segment and clearing votes and availability", async () => {
+    const { rooms } = await createRoomAndJoin("confirm-1", ["confirm-2", "confirm-3"]);
+    const [admin, b, c] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    // Two connected non-admin players (b, c) -- a majority needs both.
+    b.send("vote-skip");
+    c.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+    expect(admin.state.players.get(admin.sessionId)?.skipVote).toBe(false);
+    expect(admin.state.players.get(b.sessionId)?.skipVote).toBe(false);
+    expect(admin.state.players.get(c.sessionId)?.skipVote).toBe(false);
+  });
+
+  it("admin confirmation at the week's last segment enters week-end", async () => {
+    // daysPerWeek: 1 -> 2 segments total, so the first confirmed Forced March reaches the last
+    // segment (2) and the second, from the last segment, enters week-end.
+    const { rooms } = await createRoomAndJoin("confirm-weekend-1", ["confirm-weekend-2"], 1);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.phase, { timeout: 5_000 }).toBe("week-end");
+    expect(admin.state.timeline.segment).toBe(2);
+  });
+
+  it("rejects confirmation when no Forced March is awaiting it", async () => {
+    const { rooms } = await createRoomAndJoin("confirm-none-1");
+    const [admin] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    admin.send("confirm-skip");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.segment).toBe(1);
+  });
+
+  it("rejects a non-admin's confirmation attempt", async () => {
+    const { rooms } = await createRoomAndJoin("confirm-nonadmin-1", ["confirm-nonadmin-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+
+    other.send("confirm-skip");
+    // No message confirms rejection, so assert the negative by giving the (non-)effect time to
+    // arrive and then checking state is unchanged -- the admin's own valid confirmation below
+    // proves the room is still responsive, not just slow.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.segment).toBe(1);
+
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+  });
+});
+
+describe("GameRoom assign-lead-tokens (real Postgres)", () => {
+  it("admin assigns a Lead token to every connected player after a confirmed Forced March", async () => {
+    const { rooms } = await createRoomAndJoin("assign-1", ["assign-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(true);
+
+    admin.send("assign-lead-tokens");
+    await expect.poll(() => admin.state.players.get(admin.sessionId)?.leadTokens, { timeout: 5_000 }).toBe(1);
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(1);
+  });
+
+  it("stacks an additional Lead token on top of ones a player already holds", async () => {
+    const { rooms } = await createRoomAndJoin("assign-stack-1", ["assign-stack-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("assign-lead-tokens");
+    await expect.poll(() => admin.state.players.get(admin.sessionId)?.leadTokens, { timeout: 5_000 }).toBe(1);
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("assign-lead-tokens");
+    await expect.poll(() => admin.state.players.get(admin.sessionId)?.leadTokens, { timeout: 5_000 }).toBe(2);
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(2);
+  });
+
+  it("does not assign Lead tokens automatically when a Forced March is confirmed", async () => {
+    const { rooms } = await createRoomAndJoin("assign-manual-1", ["assign-manual-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(0);
+  });
+
+  it("rejects assignment when no Forced March has been confirmed", async () => {
+    const { rooms } = await createRoomAndJoin("assign-noskip-1");
+    const [admin] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    admin.send("assign-lead-tokens");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
+  });
+
+  it("rejects a non-admin's assignment attempt", async () => {
+    const { rooms } = await createRoomAndJoin("assign-nonadmin-1", ["assign-nonadmin-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(true);
+
+    other.send("assign-lead-tokens");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(0);
+
+    admin.send("assign-lead-tokens");
+    await expect.poll(() => admin.state.players.get(admin.sessionId)?.leadTokens, { timeout: 5_000 }).toBe(1);
+  });
+
+  it("becomes unavailable again immediately after being used", async () => {
+    const { rooms } = await createRoomAndJoin("assign-reuse-1", ["assign-reuse-2"]);
+    const [admin, other] = rooms;
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(true);
+
+    admin.send("assign-lead-tokens");
+    await expect.poll(() => admin.state.timeline.leadTokenAssignmentAvailable, { timeout: 5_000 }).toBe(false);
+
+    admin.send("assign-lead-tokens");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.leadTokenAssignmentAvailable).toBe(false);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(1);
+  });
+});
+
+describe("GameRoom vote-skill-check eligibility gate in Hunted Mode (real Postgres)", () => {
+  it("accepts a vote from a player holding a Lead token, without changing their token count", async () => {
+    const { rooms } = await createRoomAndJoin("hunted-vote-1", ["hunted-vote-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(
+        () => admin.state.timeline.cards.get("2")?.options[0].voters.includes("hunted-vote-1"),
+        { timeout: 5_000 },
+      )
+      .toBe(true);
+    // Casting a vote alone never consumes a token (see specs/road-to-survival-hunted-mode -
+    // Lead Token Consumed When a Segment Advances) -- it's only spent once the segment resolves.
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(1);
+  });
+
+  it("rejects a new vote from a player holding zero Lead tokens, recording nothing", async () => {
+    const { rooms } = await createRoomAndJoin("hunted-vote-notoken-1", ["hunted-vote-notoken-2"]);
+    const [admin] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(
+      admin.state.timeline.cards.get("1")?.options.some((o: SegmentCardOptionState) => o.voters.length > 0),
+    ).toBe(false);
+  });
+
+  it("leaves normal-mode voting unaffected by Lead-token gating", async () => {
+    const { rooms } = await createRoomAndJoin("normal-vote-1");
+    const [admin] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("1")?.options[0].voters.includes("normal-vote-1"), { timeout: 5_000 })
+      .toBe(true);
+  });
+});
+
+describe("GameRoom vote retraction (real Postgres)", () => {
+  it("removes a player's vote when they re-select the option they already voted for, visible to all players", async () => {
+    const { rooms } = await createRoomAndJoin("retract-1", ["retract-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => other.state.timeline.cards.get("1")?.options[0].voters.includes("retract-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => other.state.timeline.cards.get("1")?.options[0].voters.includes("retract-1"), { timeout: 5_000 })
+      .toBe(false);
+    expect(admin.state.timeline.cards.get("1")?.options[0].voters.includes("retract-1")).toBe(false);
+  });
+
+  it("permits retraction from a player holding zero Lead tokens in hunted mode", async () => {
+    const { rooms } = await createRoomAndJoin("retract-notoken-1", ["retract-notoken-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("retract-notoken-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    // Toggling back to normal and then back to hunted resets the admin's token count to zero
+    // without touching their already-recorded vote -- a realistic way for a player to end up
+    // holding an active vote with no tokens left before the segment resolves.
+    admin.send("set-mode", { mode: "normal" });
+    await expect.poll(() => admin.state.players.get(admin.sessionId)?.leadTokens, { timeout: 5_000 }).toBe(0);
+    admin.send("set-mode", { mode: "hunted" });
+    await expect.poll(() => admin.state.timeline.mode, { timeout: 5_000 }).toBe("hunted");
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("retract-notoken-1"), { timeout: 5_000 })
+      .toBe(false);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
+  });
+
+  it("removes a vote in normal mode the same way as in hunted mode", async () => {
+    const { rooms } = await createRoomAndJoin("retract-normal-1");
+    const [admin] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    admin.send("vote-skill-check", { optionIndex: 2 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("1")?.options[2].voters.includes("retract-normal-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    admin.send("vote-skill-check", { optionIndex: 2 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("1")?.options[2].voters.includes("retract-normal-1"), { timeout: 5_000 })
+      .toBe(false);
+  });
+
+  it("treats voting for a different option after retracting as a new vote, still subject to the token gate", async () => {
+    const { rooms } = await createRoomAndJoin("retract-revote-1", ["retract-revote-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("retract-revote-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("retract-revote-1"), { timeout: 5_000 })
+      .toBe(false);
+
+    admin.send("vote-skill-check", { optionIndex: 1 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[1].voters.includes("retract-revote-1"), { timeout: 5_000 })
+      .toBe(true);
+    // None of the cast/retract/cast cycle above touched the reserved token -- still unconsumed.
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(1);
+  });
+});
+
+describe("GameRoom Lead token consumption on segment advance (real Postgres)", () => {
+  it("readying up consumes exactly one Lead token from each connected player with an active vote", async () => {
+    const { rooms } = await createRoomAndJoin("consume-ready-1", ["consume-ready-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    other.send("vote-skill-check", { optionIndex: 1 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[1].voters.includes("consume-ready-2"), { timeout: 5_000 })
+      .toBe(true);
+
+    admin.send("ready");
+    other.send("ready");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(3);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(0);
+  });
+
+  it("a confirmed Forced March never finds an active vote to consume, since the lockout prevents reaching one", async () => {
+    const { rooms } = await createRoomAndJoin("consume-confirm-1", ["consume-confirm-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("consume-confirm-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    // The active vote locks out Forced March voting entirely (see specs/road-to-survival-hunted-
+    // mode - Forced March Vote Locked While a Skill-Check Vote Is Active) -- so a confirmed
+    // Forced March can never actually find an active vote to consume.
+    other.send("vote-skip");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(admin.state.timeline.skipConfirmationAvailable).toBe(false);
+    expect(admin.state.timeline.segment).toBe(2);
+
+    // Retracting the vote lifts the lockout -- the Forced March can now be confirmed, but with no
+    // active vote left on the segment, nothing is consumed.
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("consume-confirm-1"), { timeout: 5_000 })
+      .toBe(false);
+
+    other.send("vote-skip");
+    await expect.poll(() => admin.state.timeline.skipConfirmationAvailable, { timeout: 5_000 }).toBe(true);
+    admin.send("confirm-skip");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(3);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(1);
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(1);
+  });
+
+  it("an admin's forward override consumes tokens for active voters", async () => {
+    const { rooms } = await createRoomAndJoin("consume-override-1", ["consume-override-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("consume-override-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    admin.send("override-segment", { direction: "next" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(3);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
+  });
+
+  it("a player without an active vote is unaffected by the advance", async () => {
+    const { rooms } = await createRoomAndJoin("consume-novote-1", ["consume-novote-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    // Only the admin votes on segment 2's card -- "other" leaves their token untouched.
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("consume-novote-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    admin.send("ready");
+    other.send("ready");
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(3);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
+    expect(admin.state.players.get(other.sessionId)?.leadTokens).toBe(1);
+  });
+
+  it("an admin's backward override never consumes a token", async () => {
+    const { rooms } = await createRoomAndJoin("consume-backward-1", ["consume-backward-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("consume-backward-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    admin.send("override-segment", { direction: "previous" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(1);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(1);
+    // The vote itself is untouched by stepping backward -- only forward transitions resolve it.
+    expect(admin.state.timeline.cards.get("2")?.options[0].voters.includes("consume-backward-1")).toBe(true);
+  });
+
+  it("never reduces a player's Lead token count below zero, even if the same segment's votes are resolved twice", async () => {
+    const { rooms } = await createRoomAndJoin("consume-floor-1", ["consume-floor-2"]);
+    const [admin, other] = rooms;
+    await expect.poll(() => admin.state.timeline.cards.size, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await forcedMarchAndAssignOneTokenEach(admin, other);
+
+    admin.send("vote-skill-check", { optionIndex: 0 });
+    await expect
+      .poll(() => admin.state.timeline.cards.get("2")?.options[0].voters.includes("consume-floor-1"), { timeout: 5_000 })
+      .toBe(true);
+
+    admin.send("override-segment", { direction: "next" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(3);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
+
+    // Stepping back to segment 2 (where the same vote is still recorded) and forward again
+    // re-resolves that segment's votes -- a known, accepted edge case (see design.md) -- but the
+    // count must floor at zero rather than go negative.
+    admin.send("override-segment", { direction: "previous" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(2);
+    admin.send("override-segment", { direction: "next" });
+    await expect.poll(() => admin.state.timeline.segment, { timeout: 5_000 }).toBe(3);
+    expect(admin.state.players.get(admin.sessionId)?.leadTokens).toBe(0);
   });
 });
 

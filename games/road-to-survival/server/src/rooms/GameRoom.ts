@@ -7,7 +7,7 @@ import {
   findRoomPlayer,
   saveRoomPlayerState,
 } from "../db/rooms.js";
-import { loadOrCreateWeekCards, upsertVote } from "../db/segmentCards.js";
+import { deleteVote, loadOrCreateWeekCards, upsertVote } from "../db/segmentCards.js";
 import { GameState, PlayerState, SegmentCardOptionState, SegmentCardState } from "./schema/GameState.js";
 import { verifyRoomPassword } from "./roomCredentials.js";
 import { normalizeDaysPerWeek, totalSegments } from "./timeline.js";
@@ -27,6 +27,10 @@ interface OverrideSegmentMessage {
 
 interface VoteSkillCheckMessage {
   optionIndex: number;
+}
+
+interface SetModeMessage {
+  mode: "normal" | "hunted";
 }
 
 interface CreateOptions {
@@ -93,6 +97,7 @@ export class GameRoom extends Room<GameState> {
     // instead of regenerating (see specs/road-to-survival-skill-check-cards - Card Generation
     // Timing's "survives room recreation" scenario).
     await this.ensureWeekCards(this.state.timeline.week);
+    this.recomputeCurrentSegmentHasActiveVote();
 
     this.onMessage("ready", (client) => {
       if (this.state.timeline.phase !== "active") return;
@@ -100,6 +105,48 @@ export class GameRoom extends Room<GameState> {
       if (!player) return;
       player.ready = true;
       this.maybeAdvance();
+    });
+
+    this.onMessage<SetModeMessage>("set-mode", (client, message) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player?.isAdmin) return;
+      if (message.mode !== "normal" && message.mode !== "hunted") return;
+
+      this.state.timeline.mode = message.mode;
+      if (message.mode === "normal") {
+        for (const p of this.state.players.values()) p.leadTokens = 0;
+        this.state.timeline.skipConfirmationAvailable = false;
+        this.state.timeline.leadTokenAssignmentAvailable = false;
+      }
+    });
+
+    this.onMessage("vote-skip", (client) => {
+      if (this.state.timeline.mode !== "hunted") return;
+      if (this.state.timeline.phase !== "active") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      if (player.isAdmin) return;
+      if (this.state.timeline.currentSegmentHasActiveVote) return;
+      player.skipVote = true;
+      this.maybeSkip();
+    });
+
+    this.onMessage("confirm-skip", (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player?.isAdmin) return;
+      if (!this.state.timeline.skipConfirmationAvailable) return;
+
+      this.advanceSegment();
+      this.state.timeline.leadTokenAssignmentAvailable = true;
+    });
+
+    this.onMessage("assign-lead-tokens", (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player?.isAdmin) return;
+      if (!this.state.timeline.leadTokenAssignmentAvailable) return;
+
+      for (const p of this.state.players.values()) p.leadTokens += 1;
+      this.state.timeline.leadTokenAssignmentAvailable = false;
     });
 
     this.onMessage<ResolveWeekEndMessage>("resolve-week-end", async (client, message) => {
@@ -111,8 +158,13 @@ export class GameRoom extends Room<GameState> {
         this.state.timeline.week += 1;
         this.state.timeline.segment = 1;
         this.state.timeline.phase = "active";
-        for (const p of this.state.players.values()) p.ready = false;
+        this.state.timeline.leadTokenAssignmentAvailable = false;
+        for (const p of this.state.players.values()) {
+          p.ready = false;
+          p.skipVote = false;
+        }
         await this.ensureWeekCards(this.state.timeline.week);
+        this.recomputeCurrentSegmentHasActiveVote();
       } else if (message.outcome === "death") {
         this.state.timeline.phase = "game-over";
       }
@@ -132,6 +184,23 @@ export class GameRoom extends Room<GameState> {
       const roomPlayerId = this.roomPlayerIdBySession.get(client.sessionId);
       if (!cardState || !cardId || !roomPlayerId) return;
 
+      const currentOptionIndex = cardState.options.findIndex((option) => option.voters.includes(player.username));
+
+      if (currentOptionIndex === optionIndex) {
+        // Re-selecting the option already voted for retracts it (see
+        // specs/road-to-survival-skill-check-cards - Vote Retraction). No Lead-token gate
+        // applies -- retracting never costs anything, in either mode. Retraction alone does not
+        // clear any in-progress Forced March vote (see Forced March Vote Locked While a
+        // Skill-Check Vote Is Active) -- only casting or changing a vote does, below.
+        await deleteVote(cardId, roomPlayerId);
+        const voters = cardState.options[optionIndex].voters;
+        voters.splice(voters.indexOf(player.username), 1);
+        this.recomputeCurrentSegmentHasActiveVote();
+        return;
+      }
+
+      if (this.state.timeline.mode === "hunted" && player.leadTokens <= 0) return;
+
       await upsertVote(cardId, roomPlayerId, optionIndex);
 
       for (const option of cardState.options) {
@@ -139,6 +208,19 @@ export class GameRoom extends Room<GameState> {
         if (existingIndex !== -1) option.voters.splice(existingIndex, 1);
       }
       cardState.options[optionIndex].voters.push(player.username);
+
+      // In Hunted Mode, a Lead token is reserved (not yet spent) by this vote -- it's only
+      // deducted when the segment resolves (see specs/road-to-survival-hunted-mode - Lead Token
+      // Consumed When a Segment Advances), so a player can freely retract or change their vote
+      // before then without losing anything.
+
+      // Committing to roll a check withdraws the party's Forced March intent, even a
+      // majority already awaiting confirmation (see specs/road-to-survival-hunted-mode -
+      // Forced March Vote Locked While a Skill-Check Vote Is Active).
+      if (this.state.timeline.mode === "hunted") {
+        this.clearForcedMarchVotes();
+      }
+      this.recomputeCurrentSegmentHasActiveVote();
     });
 
     this.onMessage("export-week-rolls", (client) => {
@@ -170,7 +252,12 @@ export class GameRoom extends Room<GameState> {
         if (timeline.segment > 1) {
           timeline.segment -= 1;
         }
-        for (const p of this.state.players.values()) p.ready = false;
+        timeline.leadTokenAssignmentAvailable = false;
+        for (const p of this.state.players.values()) {
+          p.ready = false;
+          p.skipVote = false;
+        }
+        this.recomputeCurrentSegmentHasActiveVote();
       }
     });
 
@@ -193,20 +280,109 @@ export class GameRoom extends Room<GameState> {
   }
 
   /**
+   * Recomputes whether a majority of currently connected players have voted for a Forced March
+   * through the current segment, while the room is in Hunted Mode (see
+   * specs/road-to-survival-hunted-mode's Majority Forced March Vote Awaits Admin Confirmation
+   * requirement). Does NOT advance the timeline itself -- it only marks the vote as available for
+   * the admin to confirm (see confirm-skip), and clears that availability again if the majority
+   * is lost (e.g. a voting player disconnects) before the admin acts.
+   */
+  private maybeSkip(): void {
+    const { timeline } = this.state;
+    if (timeline.mode !== "hunted" || timeline.phase !== "active") {
+      timeline.skipConfirmationAvailable = false;
+      return;
+    }
+
+    // The admin never casts a Forced March vote (see specs/road-to-survival-hunted-mode -
+    // Forced March Vote), so the majority is evaluated only against non-admin players.
+    const voters = [...this.state.players.values()].filter((p) => !p.isAdmin);
+    const skipCount = voters.filter((p) => p.skipVote).length;
+    timeline.skipConfirmationAvailable = voters.length > 0 && skipCount > voters.length / 2;
+  }
+
+  /**
+   * Resets every connected player's Forced March vote and clears any awaiting-confirmation
+   * state, even if a majority had already been reached. Called when a player casts or changes
+   * (not retracts) a skill-check vote in Hunted Mode -- committing to roll a check withdraws the
+   * party's Forced March intent (see specs/road-to-survival-hunted-mode - Forced March Vote
+   * Locked While a Skill-Check Vote Is Active).
+   */
+  private clearForcedMarchVotes(): void {
+    for (const p of this.state.players.values()) p.skipVote = false;
+    this.state.timeline.skipConfirmationAvailable = false;
+  }
+
+  /**
+   * Recomputes whether the room's actual current segment's card has at least one active
+   * skill-check vote, and syncs it to `timeline.currentSegmentHasActiveVote` (see
+   * specs/road-to-survival-hunted-mode - Forced March Vote Locked While a Skill-Check Vote Is
+   * Active). Called whenever a vote is cast, changed, or retracted on the current segment, and
+   * whenever the current segment itself changes.
+   */
+  private recomputeCurrentSegmentHasActiveVote(): void {
+    const { timeline } = this.state;
+    const cardState = timeline.cards.get(String(timeline.segment));
+    timeline.currentSegmentHasActiveVote = cardState
+      ? cardState.options.some((option) => option.voters.length > 0)
+      : false;
+  }
+
+  /**
    * Increments the segment, or -- on the week's last segment -- enters the week-end decision
-   * state instead of advancing further, then resets every connected player's readiness (see
-   * specs/road-to-survival-timeline-board's Segment Advances / Week-End Decision Point
-   * requirements).
+   * state instead of advancing further, then resets every connected player's readiness and
+   * skip vote (see specs/road-to-survival-timeline-board's Segment Advances / Week-End Decision
+   * Point requirements, and specs/road-to-survival-hunted-mode's Admin Confirms the Forced March
+   * requirement). Also clears the Forced March confirmation availability and any pending
+   * Lead-token assignment, since both were earned by the specific segment being left --
+   * confirm-skip re-enables the Lead-token assignment immediately after, when this transition was
+   * itself triggered by a confirmed Forced March. This is the single transition shared by
+   * ready-up, a confirmed Forced March, and the forward admin override, so consuming Lead tokens
+   * for the segment being left happens here too -- covering all three chargeable paths at once
+   * (see specs/road-to-survival-hunted-mode's Lead Token Consumed When a Segment Advances
+   * requirement). The backward override never calls this method, so it never charges a token.
    */
   private advanceSegment(): void {
     const { timeline } = this.state;
+    this.consumeLeadTokensForSegment(timeline.segment);
+
     const total = totalSegments(timeline.daysPerWeek);
     if (timeline.segment < total) {
       timeline.segment += 1;
     } else {
       timeline.phase = "week-end";
     }
-    for (const p of this.state.players.values()) p.ready = false;
+    timeline.skipConfirmationAvailable = false;
+    timeline.leadTokenAssignmentAvailable = false;
+    for (const p of this.state.players.values()) {
+      p.ready = false;
+      p.skipVote = false;
+    }
+    this.recomputeCurrentSegmentHasActiveVote();
+  }
+
+  /**
+   * Consumes one Lead token from every currently connected player who holds an active
+   * skill-check vote on the given segment's card, while the room is in Hunted Mode. A player who
+   * voted and then disconnected before the segment resolves is not charged -- they're no longer
+   * in `this.state.players` (keyed by sessionId) to look up, consistent with how other ephemeral
+   * per-player Hunted-Mode state doesn't survive a disconnect/reconnect either.
+   */
+  private consumeLeadTokensForSegment(segment: number): void {
+    if (this.state.timeline.mode !== "hunted") return;
+
+    const cardState = this.state.timeline.cards.get(String(segment));
+    if (!cardState) return;
+
+    const votedUsernames = new Set<string>();
+    for (const option of cardState.options) {
+      for (const username of option.voters) votedUsernames.add(username);
+    }
+    for (const player of this.state.players.values()) {
+      if (votedUsernames.has(player.username)) {
+        player.leadTokens = Math.max(0, player.leadTokens - 1);
+      }
+    }
   }
 
   /**
@@ -305,6 +481,7 @@ export class GameRoom extends Room<GameState> {
     this.state.players.delete(client.sessionId);
     this.roomPlayerIdBySession.delete(client.sessionId);
     this.maybeAdvance();
+    this.maybeSkip();
     console.log(`${client.sessionId} left ${this.roomId}`);
   }
 

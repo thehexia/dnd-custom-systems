@@ -60,3 +60,11 @@ export function upsertVote(
     include: { roomPlayer: true },
   });
 }
+
+// Used for vote retraction (see specs/road-to-survival-skill-check-cards - Vote Retraction).
+// deleteMany rather than delete: a no-op if the row is somehow already gone, instead of throwing.
+export function deleteVote(cardId: string, roomPlayerId: string): Promise<Prisma.BatchPayload> {
+  return prisma.roomSegmentVote.deleteMany({
+    where: { cardId, roomPlayerId },
+  });
+}
